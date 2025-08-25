@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Presidential Preference Sorter & Tier List</title>
+  <meta name="description" content="Interactive pairwise sorter and tier list for U.S. presidents. Works offline, supports PNG/JSON export and shareable links.">
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🇺🇸</text></svg>">
+  
+  <!-- Libraries (deferred) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <script defer src="app.js"></script>
+
+  <!--
+  To deploy on GitHub Pages:
+  1) Commit & push to main.
+  2) Repo Settings → Pages → Deploy from branch → main (/root).
+  3) App will be served at https://<user>.github.io/<repo>/
+  -->
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <h1 class="app-title">Presidential Preference Sorter & Tier List</h1>
+      <div class="header-actions">
+        <button id="btn-theme" class="btn" aria-label="Toggle theme" title="Toggle theme (dark/light)">🌗</button>
+        <button id="btn-help" class="btn" aria-haspopup="dialog" aria-controls="modal-help" title="About / Help">?</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Router screens -->
+    <section id="screen-welcome" class="screen" aria-labelledby="welcome-title">
+      <h2 id="welcome-title">Welcome</h2>
+      <p>This tool lets you sort U.S. presidents via pairwise choices and then build a custom SS–F tier list. All data stays on your device. You can export or share your state any time.</p>
+      <div class="welcome-actions">
+        <button id="btn-start" class="btn primary">Start Sorting</button>
+        <button id="btn-resume" class="btn" hidden>Resume</button>
+        <button id="btn-skip-to-tiers" class="btn" hidden>Skip to Tier Board</button>
+  <!-- <button id="btn-repair" class="btn">Repair State</button> -->
+      </div>
+    </section>
+
+    <section id="screen-sorter" class="screen" hidden aria-labelledby="sorter-title">
+      <div class="sorter-main">
+        <div class="sorter-left">
+          <div class="sticky-actions">
+            <div class="progress" aria-label="Sorting progress">
+              <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width:0%"></div>
+            </div>
+            <div class="shortcuts">Shortcuts: ← Left, T Tie, → Right</div>
+          </div>
+          <h2 id="sorter-title">Pairwise Sorter</h2>
+          <div id="sorter-cards" class="cards">
+            <article class="card" id="card-left" aria-live="polite"></article>
+            <article class="card" id="card-right" aria-live="polite"></article>
+          </div>
+          <div class="controls">
+            <button id="choose-left" class="btn xl">← Left (A)</button>
+            <button id="choose-tie" class="btn xl">Tie</button>
+            <button id="choose-right" class="btn xl">Right (B) →</button>
+          </div>
+          <div class="secondary-controls">
+            <button id="choose-back" class="btn">Back</button>
+            <!-- <button id="choose-skip" class="btn">Skip for now</button> -->
+            <button id="btn-cancel-sort" class="btn">Cancel</button>
+          </div>
+        </div>
+
+        <aside class="sorter-right">
+          <!-- Live provisional ranking -->
+          <details id="live-ranking" class="live-panel" open>
+            <summary>Current ranking (provisional)</summary>
+            <ol id="live-ranking-list" class="live-list"></ol>
+          </details>
+        </aside>
+      </div>
+    </section>
+
+    <section id="screen-results" class="screen" hidden aria-labelledby="results-title">
+      <h2 id="results-title">Sorted Results</h2>
+      <ol id="results-list" class="results-list"></ol>
+      <div class="results-actions">
+        <button id="btn-to-tiers" class="btn primary">Build Tier List</button>
+        <!-- <button id="btn-cutoffs" class="btn">Set Tier Cutoffs</button> -->
+      </div>
+    </section>
+
+    <!-- Tier Cutoffs Wizard -->
+    <section id="screen-cutoffs" class="screen" hidden aria-labelledby="cutoffs-title">
+      <h2 id="cutoffs-title">Choose Tier Cutoffs</h2>
+      <p id="cutoffs-instructions">We’ll split your ranking into tiers. Pick how many from the top belong in the current tier.</p>
+      <div id="cutoffs-status"></div>
+      <div id="cutoffs-controls" class="cutoffs-controls">
+        <label>
+          <span id="cutoffs-tier-label">Tier</span>
+          <input id="cutoffs-count" type="number" min="0" step="1" value="0" class="input" style="width:6rem" />
+          <span id="cutoffs-remaining"></span>
+        </label>
+        <div class="cutoffs-buttons">
+          <button id="btn-cutoffs-prev" class="btn">Back</button>
+          <button id="btn-cutoffs-next" class="btn primary">Next</button>
+          <button id="btn-cutoffs-apply" class="btn primary" hidden>Apply</button>
+          <button id="btn-cutoffs-cancel" class="btn">Cancel</button>
+        </div>
+      </div>
+      <ol id="cutoffs-list" class="results-list" style="max-height:50vh; overflow:auto"></ol>
+    </section>
+
+    <section id="screen-tier" class="screen" hidden aria-labelledby="tier-title">
+      <h2 id="tier-title">Tier Board</h2>
+      <div class="tier-actions">
+        <button id="btn-export-png" class="btn">Export PNG</button>
+        <label class="checkbox"><input type="checkbox" id="png-transparent" /> Transparent background</label>
+        <button id="btn-export-json" class="btn">Export JSON</button>
+        <label class="file-input btn">Import JSON<input id="input-import-json" type="file" accept="application/json" hidden /></label>
+        <button id="btn-share" class="btn">Copy Share Link</button>
+        <button id="btn-reset" class="btn danger">Reset</button>
+      </div>
+
+      <div id="tier-board" class="tier-board" aria-label="Tier board">
+        <!-- Columns injected by JS: SS, S, A, B, C, D, F, Unplaced -->
+      </div>
+
+      <div class="tier-search">
+        <input id="tier-filter" class="input" type="search" placeholder="Filter by name…" aria-label="Filter by name" />
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <small>Built for GitHub Pages. All processing is local. Images are for demonstration.</small>
+    </div>
+  </footer>
+
+  <!-- Help modal -->
+  <dialog id="modal-help" aria-labelledby="help-title">
+    <h3 id="help-title">About & Help</h3>
+    <p>
+      This app uses an interactive merge sort. You compare two candidates at a time. Ties keep the left list's order.
+      Keyboard shortcuts: ← Left, T Tie, → Right. Your progress and tier board save automatically in your browser.
+    </p>
+    <p>
+      Privacy: no data leaves your device. Share links encode your state in the URL hash only.
+    </p>
+    <form method="dialog">
+      <button class="btn">Close</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+  <!-- Embedded data fallback for file:// usage -->
+  <script id="presidents-json" type="application/json">
+[
+    {"id":"washington","number":1,"name":"George Washington","years":"1789–1797"},
+    {"id":"adams","number":2,"name":"John Adams","years":"1797–1801"},
+    {"id":"jefferson","number":3,"name":"Thomas Jefferson","years":"1801–1809"},
+    {"id":"madison","number":4,"name":"James Madison","years":"1809–1817"},
+    {"id":"monroe","number":5,"name":"James Monroe","years":"1817–1825"},
+    {"id":"quincy_adams","number":6,"name":"John Quincy Adams","years":"1825–1829"},
+    {"id":"jackson","number":7,"name":"Andrew Jackson","years":"1829–1837"},
+    {"id":"van_buren","number":8,"name":"Martin Van Buren","years":"1837–1841"},
+  {"id":"william_henry_harrison","number":9,"name":"William Henry Harrison","years":"1841"},
+    {"id":"tyler","number":10,"name":"John Tyler","years":"1841–1845"},
+    {"id":"polk","number":11,"name":"James K. Polk","years":"1845–1849"},
+    {"id":"taylor","number":12,"name":"Zachary Taylor","years":"1849–1850"},
+    {"id":"fillmore","number":13,"name":"Millard Fillmore","years":"1850–1853"},
+    {"id":"pierce","number":14,"name":"Franklin Pierce","years":"1853–1857"},
+    {"id":"buchanan","number":15,"name":"James Buchanan","years":"1857–1861"},
+    {"id":"lincoln","number":16,"name":"Abraham Lincoln","years":"1861–1865"},
+    {"id":"johnson","number":17,"name":"Andrew Johnson","years":"1865–1869"},
+    {"id":"grant","number":18,"name":"Ulysses S. Grant","years":"1869–1877"},
+    {"id":"hayes","number":19,"name":"Rutherford B. Hayes","years":"1877–1881"},
+    {"id":"garfield","number":20,"name":"James A. Garfield","years":"1881"},
+    {"id":"arthur","number":21,"name":"Chester A. Arthur","years":"1881–1885"},
+    {"id":"cleveland","number":22,"name":"Grover Cleveland","years":"1885–1889, 1893–1897"},
+  {"id":"benjamin_harrison","number":23,"name":"Benjamin Harrison","years":"1889–1893"},
+    {"id":"mckinley","number":25,"name":"William McKinley","years":"1897–1901"},
+    {"id":"teddy_roosevelt","number":26,"name":"Theodore Roosevelt","years":"1901–1909"},
+    {"id":"taft","number":27,"name":"William Howard Taft","years":"1909–1913"},
+    {"id":"wilson","number":28,"name":"Woodrow Wilson","years":"1913–1921"},
+    {"id":"harding","number":29,"name":"Warren G. Harding","years":"1921–1923"},
+    {"id":"coolidge","number":30,"name":"Calvin Coolidge","years":"1923–1929"},
+    {"id":"hoover","number":31,"name":"Herbert Hoover","years":"1929–1933"},
+    {"id":"fdr","number":32,"name":"Franklin D. Roosevelt","years":"1933–1945"},
+    {"id":"truman","number":33,"name":"Harry S. Truman","years":"1945–1953"},
+    {"id":"ike","number":34,"name":"Dwight D. Eisenhower","years":"1953–1961"},
+    {"id":"jfk","number":35,"name":"John F. Kennedy","years":"1961–1963"},
+    {"id":"lbj","number":36,"name":"Lyndon B. Johnson","years":"1963–1969"},
+    {"id":"nixon","number":37,"name":"Richard Nixon","years":"1969–1974"},
+    {"id":"ford","number":38,"name":"Gerald Ford","years":"1974–1977"},
+    {"id":"carter","number":39,"name":"Jimmy Carter","years":"1977–1981"},
+    {"id":"reagan","number":40,"name":"Ronald Reagan","years":"1981–1989"},
+    {"id":"bush","number":41,"name":"George H. W. Bush","years":"1989–1993"},
+    {"id":"clinton","number":42,"name":"Bill Clinton","years":"1993–2001"},
+    {"id":"george_w_bush","number":43,"name":"George W. Bush","years":"2001–2009"},
+    {"id":"obama","number":44,"name":"Barack Obama","years":"2009–2017"},
+    {"id":"trump","number":45,"name":"Donald Trump","years":"2017–2021"},
+    {"id":"biden","number":46,"name":"Joe Biden","years":"2021–present"}
+]
+  </script>
+</body>
+</html>
