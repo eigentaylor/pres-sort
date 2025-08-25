@@ -376,6 +376,26 @@ function updateProgress(pct) {
   const bar = $('#progress-bar');
   bar.style.width = `${Math.round(pct)}%`;
   bar.setAttribute('aria-valuenow', String(Math.round(pct)));
+  const txt = $('#progress-text');
+  if (txt) {
+    const n = state?.sorter?.totalComparisons ?? 0;
+    const done = countUniqueCachePairs(state?.sorter?.cache || {});
+    txt.textContent = n > 0 ? `${done}/${n}` : '';
+  }
+}
+
+// Count unique unordered comparison pairs in the cache (dedupe A|B vs B|A)
+function countUniqueCachePairs(cache) {
+  if (!cache || typeof cache !== 'object') return 0;
+  const seen = new Set();
+  for (const k of Object.keys(cache)) {
+    const parts = k.split('|');
+    if (parts.length !== 2) continue;
+    const [a, b] = parts;
+    const canon = a < b ? `${a}|${b}` : `${b}|${a}`;
+    seen.add(canon);
+  }
+  return seen.size;
 }
 
 // Build a provisional ranking from current merge-sort state for live display
@@ -532,6 +552,9 @@ function initSort(items) {
     L: [], R: [], out: [],
     li: 0, rj: 0,
   };
+  // precompute total comparisons for display
+  const n = state.sorter.stack.arr.length;
+  state.sorter.totalComparisons = totalComparisonUpperBound(n);
   // reset undo and seed with initial snapshot
   state.sorter.undo = [];
   pushUndoSnapshot();
@@ -575,7 +598,7 @@ async function continueSort() {
   if (!st) return;
 
   const N = st.arr.length;
-  const estimate = () => updateProgress(estimateProgress(N, Object.keys(state.sorter.cache).length));
+  const estimate = () => updateProgress(estimateProgress(N, countUniqueCachePairs(state.sorter.cache)));
 
   while (st.width < N) {
     if (st.i >= st.arr.length) { st.width *= 2; st.i = 0; continue; }
@@ -731,10 +754,19 @@ async function continueSort() {
   showScreen('screen-results');
 }
 
-function estimateProgress(n, cacheSize) {
-  const total = Math.ceil(n * Math.log2(Math.max(1, n)));
-  const pct = Math.min(100, (cacheSize / total) * 100);
+function estimateProgress(n, uniquePairCount) {
+  // Tighter upper bound for number of comparisons in merge sort:
+  // total <= n*ceil(log2 n) - (2^ceil(log2 n) - 1)
+  if (n <= 1) return 100;
+  const total = totalComparisonUpperBound(n);
+  const pct = Math.min(100, total > 0 ? (uniquePairCount / total) * 100 : 0);
   return pct;
+}
+
+function totalComparisonUpperBound(n) {
+  if (n <= 1) return 0;
+  const h = Math.ceil(Math.log2(Math.max(1, n)));
+  return n * h - (Math.pow(2, h) - 1);
 }
 
 // --- Results UI -------------------------------------------------------------
@@ -899,8 +931,8 @@ function makeTierItem(person) {
     for (const src of candidates) {
       console.debug('makeTierItem: trying', person.id, src);
       await new Promise(res => {
-  const i = new Image(); i.width = 40; i.height = 50; i.alt = `Portrait of ${person.name}`; i.loading = 'lazy';
-  i.onload = () => { if (!loaded) { i.className = 'tier-img'; try { imgWrap.innerHTML=''; } catch(e){} imgWrap.appendChild(i); try { imgWrap.style.backgroundImage = `url(${src})`; imgWrap.style.backgroundSize = 'cover'; imgWrap.style.backgroundPosition = 'center'; } catch(e){} loaded = true; } res(true); };
+  const i = new Image(); i.width = 40; i.height = 50; i.alt = `Portrait of ${person.name}`; i.loading = 'eager'; i.decoding = 'async';
+  i.onload = () => { if (!loaded) { i.className = 'tier-img'; try { imgWrap.innerHTML=''; } catch(e){} imgWrap.appendChild(i); try { imgWrap.style.backgroundImage = `url(${src})`; imgWrap.style.backgroundSize = 'cover'; imgWrap.style.backgroundPosition = 'center'; } catch(e){} try { person._resolved = src; } catch(_){} loaded = true; } res(true); };
   i.onerror = () => res(false);
   i.src = src;
       }).then(ok => { if (ok) console.debug('makeTierItem: loaded', person.id, src); else console.debug('makeTierItem: not loaded', person.id, src); });
@@ -1138,7 +1170,7 @@ async function startSorting() {
   console.log('startSorting: items sample', items.slice(0,6));
   initSort(items);
     showScreen('screen-sorter');
-    updateProgress(estimateProgress(items.length, Object.keys(state.sorter.cache).length));
+  updateProgress(estimateProgress(items.length, countUniqueCachePairs(state.sorter.cache)));
   const btnBack = document.getElementById('choose-back');
   if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
     await continueSort();
