@@ -115,7 +115,7 @@ body {
 .tier-actions { display:flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
 
 .tier-board { display: grid; gap: .75rem; grid-template-columns: 1fr; }
-@media (min-width: 900px) { .tier-board { grid-template-columns: repeat(8, 1fr); } }
+@media (min-width: 950px) { .tier-board { grid-template-columns: repeat(8, minmax(120px, 1fr)); } }
 
 .tier-col { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display:grid; grid-template-rows: auto 1fr; min-height: 220px; }
 .tier-col header { padding: .5rem .75rem; font-weight: 700; background: #0c1016; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content: space-between; }
@@ -123,7 +123,7 @@ body {
 
 .tier-item { display:flex; flex-direction: column; align-items:center; justify-content:flex-start; gap: .25rem; padding: 6px 4px; background: transparent; border: none; border-radius: 6px; cursor: grab; position: relative; }
 .tier-item:active { cursor: grabbing; }
-.tier-img-wrap { width: 56px; height: 70px; display: grid; place-items: center; background: #0c1118; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); overflow: visible; }
+.tier-img-wrap { width: 72px; height: 90px; display: grid; place-items: center; background: #0c1118; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); overflow: visible; }
 .tier-img-wrap img { width: 100%; height: 100%; object-fit: cover; display:block; }
 .tier-item .name { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .tier-item .pres-number.small { display: none; }
@@ -132,7 +132,7 @@ body {
 .tier-caption {
   position: absolute;
   left: 50%;
-  bottom: -10px;
+  top: calc(100% + 2px);
   transform: translateX(-50%) translateY(8px) scaleY(0.96);
   white-space: nowrap;
   padding: 6px 8px;
