@@ -97,6 +97,7 @@ body {
 .live-item { display: flex; align-items: baseline; gap: .25rem; color: var(--muted); }
 .live-item .rankno { width: 2.5ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
 .live-item.comparing { color: var(--text); font-weight: 600; }
+.elo-rating { margin-left: auto; color: var(--muted); font-size: .95rem; font-variant-numeric: tabular-nums; }
 
 .tier-actions { display:flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
 

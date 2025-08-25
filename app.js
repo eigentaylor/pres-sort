@@ -186,6 +186,7 @@ const defaultState = () => ({
   data: [], // loaded presidents
   // sorter state
   sorter: {
+    mode: 'merge', // 'merge' | 'elo'
     active: false,
     pendingResolve: null, // internal
     cache: {}, // key "A|B" -> 1 (A>B), 0 (tie), -1 (A<B)
@@ -194,6 +195,14 @@ const defaultState = () => ({
     stack: null, // serialized async mergesort state
     result: null, // array of ids when done
   undo: [], // stack of snapshots to support Back
+    // ELO-specific
+    elo: {
+      ratings: {}, // id -> rating
+      kFactor: 32,
+      pairsDone: 0,
+      totalPairs: 0,
+      queue: [], // pending ids to compare
+    },
   },
   // tier board
   tiers: { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] },
@@ -419,7 +428,19 @@ function computeProvisionalRanking() {
 function renderLiveRanking(currentPairIds = null) {
   const listEl = $('#live-ranking-list');
   if (!listEl) return;
-  const items = state.sorter.stack ? computeProvisionalRanking() : (state.sorter.result || []);
+  let items;
+  if (state.sorter.mode === 'elo') {
+    const elo = state.sorter.elo;
+    if (elo && elo.ratings && Object.keys(elo.ratings).length) {
+      const idMap = new Map(state.data.map(p => [p.id, p]));
+      const ids = Object.keys(elo.ratings).sort((a,b) => elo.ratings[b] - elo.ratings[a]);
+      items = ids.map(id => idMap.get(id)).filter(Boolean);
+    } else {
+      items = state.sorter.result || [];
+    }
+  } else {
+    items = state.sorter.stack ? computeProvisionalRanking() : (state.sorter.result || []);
+  }
   listEl.innerHTML = '';
   let rank = 1;
   for (let i = 0; i < items.length; i++) {
@@ -435,6 +456,14 @@ function renderLiveRanking(currentPairIds = null) {
     const num = document.createElement('span'); num.className = 'rankno'; num.textContent = `${rank}.`;
     const name = document.createElement('span'); name.textContent = ' ' + p.name;
     li.append(num, name);
+    // If in ELO mode, show rounded rating to the right
+    if (state.sorter.mode === 'elo' && state.sorter.elo && state.sorter.elo.ratings) {
+      const rating = Math.round((state.sorter.elo.ratings[p.id] || 0));
+      const rspan = document.createElement('span');
+      rspan.className = 'elo-rating';
+      rspan.textContent = String(rating);
+      li.appendChild(rspan);
+    }
     if (currentPairIds && (p.id === currentPairIds[0] || p.id === currentPairIds[1])) li.classList.add('comparing');
     listEl.appendChild(li);
   }
@@ -559,6 +588,119 @@ function initSort(items) {
   state.sorter.undo = [];
   pushUndoSnapshot();
   saveState();
+}
+
+// --- ELO mode --------------------------------------------------------------
+function initElo(items) {
+  if (!Array.isArray(items) || items.length === 0) throw new Error('No items to sort');
+  state.sorter.mode = 'elo';
+  state.sorter.active = true;
+  state.sorter.result = null;
+  state.sorter.stack = null;
+  state.sorter.cache = {}; state.sorter.ties = {}; state.sorter.undo = [];
+  const ids = idsOf(items);
+  const elo = { ratings: {}, kFactor: 32, pairsDone: 0, totalPairs: estimateEloPairTarget(ids.length), queue: [] };
+  // init ratings
+  ids.forEach(id => { elo.ratings[id] = 1000; });
+  // seed queue with a shuffled round-robin cycle to ensure broad coverage initially
+  const cycles = Math.max(2, Math.ceil(Math.log2(Math.max(2, ids.length))));
+  for (let c = 0; c < cycles; c++) {
+    const shuffled = seededShuffle(state.data, state.seed + c).map(p => p.id).filter(id => elo.ratings[id] != null);
+    for (let i = 0; i < shuffled.length - 1; i++) {
+      elo.queue.push([shuffled[i], shuffled[i + 1]]);
+    }
+  }
+  state.sorter.elo = elo;
+  pushUndoSnapshot();
+  saveState();
+}
+
+function estimateEloPairTarget(n) {
+  // Reasonable interaction budget; grows near O(n log n)
+  if (n <= 1) return 0;
+  const h = Math.ceil(Math.log2(n));
+  return Math.max(n - 1, Math.round(1.5 * n * h));
+}
+
+function eloExpected(ra, rb) { return 1 / (1 + Math.pow(10, (rb - ra) / 400)); }
+
+function eloUpdate(r, score, expected, k) { return r + k * (score - expected); }
+
+async function continueElo() {
+  const idMap = new Map(state.data.map(p => [p.id, p]));
+  const elo = state.sorter.elo;
+  const nextPair = () => {
+    // Pull from queue; if empty, pick two with closest ratings to refine borders
+    if (elo.queue.length > 0) return elo.queue.shift();
+    const ids = Object.keys(elo.ratings);
+    ids.sort((a,b) => elo.ratings[b] - elo.ratings[a]);
+    let best = null; let bestDiff = Infinity;
+    for (let i = 0; i < ids.length - 1; i++) {
+      const diff = Math.abs(elo.ratings[ids[i]] - elo.ratings[ids[i+1]]);
+      if (diff < bestDiff) { bestDiff = diff; best = [ids[i], ids[i+1]]; }
+    }
+    return best;
+  };
+
+  const prefer = makePrefer();
+  const total = elo.totalPairs;
+  const progressFromElo = () => {
+    const done = elo.pairsDone;
+    const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+    updateProgress(pct);
+  };
+
+  while (elo.pairsDone < total) {
+    const pairIds = nextPair();
+    if (!pairIds) break;
+    const a = idMap.get(pairIds[0]);
+    const b = idMap.get(pairIds[1]);
+    if (!a || !b || a.id === b.id) continue;
+    // show and ask
+    pushUndoSnapshot();
+    const res = await prefer(a, b);
+    if (res === 'BACK') { restoreFromUndo(); continue; }
+    if (res === null) {
+      // Treat skip as a draw; requeue later to revisit
+      elo.queue.push([a.id, b.id]);
+      saveState();
+      continue;
+    }
+    const ra = elo.ratings[a.id];
+    const rb = elo.ratings[b.id];
+    const Ea = eloExpected(ra, rb);
+    const Eb = 1 - Ea;
+    const k = elo.kFactor;
+    const isTie = res === 0;
+    const Sa = isTie ? 0.5 : (res > 0 ? 1 : 0);
+    const Sb = isTie ? 0.5 : (res < 0 ? 1 : 0);
+    elo.ratings[a.id] = eloUpdate(ra, Sa, Ea, k);
+    elo.ratings[b.id] = eloUpdate(rb, Sb, Eb, k);
+    elo.pairsDone++;
+    // Occasionally add comparisons across the spectrum
+    if (elo.pairsDone % 7 === 0) {
+      const ids = Object.keys(elo.ratings).sort((x,y) => elo.ratings[y] - elo.ratings[x]);
+      const mid = Math.floor(ids.length / 2);
+      const lo = ids[Math.max(0, mid - 1)];
+      const hi = ids[Math.min(ids.length - 1, mid + 1)];
+      if (lo && hi && lo !== hi) elo.queue.push([lo, hi]);
+    }
+    saveState();
+    progressFromElo();
+    try { renderLiveRanking([a.id, b.id]); } catch {}
+  }
+
+  // Finish: convert ratings to sorted list
+  const ids = Object.keys(elo.ratings).sort((a,b) => elo.ratings[b] - elo.ratings[a]);
+  const result = ids.map(id => idMap.get(id)).filter(Boolean);
+  state.sorter.active = false;
+  state.sorter.result = result;
+  state.sorter.mode = 'elo';
+  const btnBackEnd = document.getElementById('choose-back'); if (btnBackEnd) btnBackEnd.disabled = true;
+  updateProgress(100);
+  saveState();
+  renderResults(result);
+  showScreen('screen-results');
 }
 
 function pushUndoSnapshot() {
@@ -1068,6 +1210,14 @@ function applyStateOnLoad(loadedData) {
       catch (err) { console.error(err); toast('Start failed', { error: true }); }
     });
   }
+  const btnStartElo = $('#btn-start-elo');
+  if (btnStartElo) {
+    btnStartElo.disabled = false;
+    btnStartElo.addEventListener('click', async () => {
+      try { await startSortingElo(); }
+      catch (err) { console.error(err); toast('Start (ELO) failed', { error: true }); }
+    });
+  }
   // Repair button: run sanitizer and show before/after counts
   const btnRepair = $('#btn-repair');
   if (btnRepair) btnRepair.onclick = () => {
@@ -1089,10 +1239,12 @@ function applyStateOnLoad(loadedData) {
   };
   $('#btn-resume').onclick = async () => {
     showScreen('screen-sorter');
-    if (!state.sorter.stack) {
-      // if no stack but cache exists, reconstruct from start
-      initSort(seededShuffle(state.data, state.seed));
+    if (state.sorter.mode === 'elo') {
+      if (!state.sorter.elo || !state.sorter.elo.queue?.length) initElo(seededShuffle(state.data, state.seed));
+      await continueElo();
+      return;
     }
+    if (!state.sorter.stack) { initSort(seededShuffle(state.data, state.seed)); }
   const btnBack = document.getElementById('choose-back');
   if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
     await continueSort();
@@ -1189,6 +1341,31 @@ function showTierBoard() {
   }
   buildTierBoard();
   showScreen('screen-tier');
+}
+
+async function startSortingElo() {
+  try {
+    clearState();
+    state = defaultState();
+    state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+    let fresh;
+    try { fresh = await loadData(); } catch (e) { fresh = Array.isArray(state.data) ? state.data : []; }
+    const source = Array.from(fresh || []).filter(p => p && p.id);
+    state.data = source;
+    saveState();
+    if (source.length === 0) throw new Error('No valid candidates available');
+    const items = seededShuffle(source, state.seed);
+    initElo(items);
+    showScreen('screen-sorter');
+    updateProgress(0);
+    const btnBack = document.getElementById('choose-back');
+    if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+    await continueElo();
+  } catch (err) {
+    console.error('startSortingElo error', err);
+    toast('An error occurred starting ELO mode', { error: true });
+    throw err;
+  }
 }
 
 // Initial load
