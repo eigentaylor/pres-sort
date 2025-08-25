@@ -739,14 +739,21 @@ async function continueElo() {
 function pushUndoSnapshot() {
   try {
     const snap = {
+      // core sorter fields
+      mode: state.sorter.mode,
+      active: !!state.sorter.active,
+      totalComparisons: state.sorter.totalComparisons ?? 0,
+      // merge-sort state
       stack: JSON.parse(JSON.stringify(state.sorter.stack)),
       cache: JSON.parse(JSON.stringify(state.sorter.cache)),
       ties: JSON.parse(JSON.stringify(state.sorter.ties)),
-      active: !!state.sorter.active,
+      // elo state
+      elo: JSON.parse(JSON.stringify(state.sorter.elo || null)),
     };
     state.sorter.undo.push(snap);
     // cap memory
-    if (state.sorter.undo.length > 300) state.sorter.undo.splice(0, state.sorter.undo.length - 300);
+    const MAX_UNDO = 2000; // allow long backtracks
+    if (state.sorter.undo.length > MAX_UNDO) state.sorter.undo.splice(0, state.sorter.undo.length - MAX_UNDO);
   } catch (e) { console.warn('pushUndoSnapshot failed', e); }
 }
 
@@ -757,12 +764,31 @@ function restoreFromUndo() {
   stack.pop();
   const prev = stack[stack.length - 1];
   if (!prev) return false;
+  state.sorter.mode = prev.mode || state.sorter.mode;
+  state.sorter.active = !!prev.active;
+  state.sorter.totalComparisons = prev.totalComparisons ?? state.sorter.totalComparisons;
   state.sorter.stack = prev.stack;
   state.sorter.cache = prev.cache;
   state.sorter.ties = prev.ties;
-  state.sorter.active = prev.active;
+  state.sorter.elo = prev.elo || null;
   saveState();
   toast('Undid last choice', { ok: true });
+  // Refresh UI bits (progress and live ranking) to reflect restored state
+  try {
+    if (state.sorter.mode === 'elo' && state.sorter.elo) {
+      const done = state.sorter.elo.pairsDone || 0;
+      const total = state.sorter.elo.totalPairs || state.sorter.totalComparisons || 0;
+      const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+      updateProgress(pct);
+    } else if (state.sorter.stack) {
+      const n = Array.isArray(state.sorter.stack.arr) ? state.sorter.stack.arr.length : 0;
+      const donePairs = countUniqueCachePairs(state.sorter.cache || {});
+      updateProgress(estimateProgress(n, donePairs));
+    } else {
+      updateProgress(0);
+    }
+  } catch {}
+  try { renderLiveRanking(); } catch {}
   return true;
 }
 

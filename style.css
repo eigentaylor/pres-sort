@@ -119,7 +119,7 @@ body {
 
 .tier-col { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display:grid; grid-template-rows: auto 1fr; min-height: 220px; }
 .tier-col header { padding: .5rem .75rem; font-weight: 700; background: #0c1016; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content: space-between; }
-.tier-col .list { padding: .5rem; display: grid; gap: .5rem; align-content: start; }
+.tier-col .list { padding: .25rem; display: grid; gap: .25rem; align-content: start; }
 
 .tier-item { display:flex; flex-direction: column; align-items:center; justify-content:flex-start; gap: .25rem; padding: 6px 4px; background: transparent; border: none; border-radius: 6px; cursor: grab; position: relative; }
 .tier-item:active { cursor: grabbing; }
