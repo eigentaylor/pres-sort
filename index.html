@@ -44,6 +44,15 @@
         <button id="btn-skip-to-tiers" class="btn" hidden>Skip to Tier Board</button>
   <!-- <button id="btn-repair" class="btn">Repair State</button> -->
       </div>
+      <div class="welcome-elo-settings" style="margin-top:.5rem">
+        <label style="display:inline-flex;align-items:center;gap:.5rem">ELO intensity:
+          <select id="elo-intensity" class="input" style="width:10rem">
+            <option value="fast">Fast (fewer matches)</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="accurate">Accurate (more matches)</option>
+          </select>
+        </label>
+      </div>
     </section>
 
     <section id="screen-sorter" class="screen" hidden aria-labelledby="sorter-title">

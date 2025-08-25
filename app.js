@@ -202,7 +202,9 @@ const defaultState = () => ({
       pairsDone: 0,
       totalPairs: 0,
       queue: [], // pending ids to compare
+      history: {}, // id -> [r1, r2, ...] (recent values)
     },
+    eloIntensity: 'balanced', // 'fast' | 'balanced' | 'accurate'
   },
   // tier board
   tiers: { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] },
@@ -462,7 +464,21 @@ function renderLiveRanking(currentPairIds = null) {
       const rspan = document.createElement('span');
       rspan.className = 'elo-rating';
       rspan.textContent = String(rating);
+      // show delta if available
+      let deltaSpan = null;
+      try {
+        const hist = state.sorter.elo.history && state.sorter.elo.history[p.id];
+        if (Array.isArray(hist) && hist.length >= 2) {
+          const prev = hist[hist.length - 2];
+          const delta = Math.round(rating - prev);
+          deltaSpan = document.createElement('span');
+          deltaSpan.className = 'rating-delta';
+          deltaSpan.textContent = delta > 0 ? `+${delta}` : String(delta);
+          deltaSpan.title = `Recent ratings: ${hist.join(', ')}`;
+        }
+      } catch (e) {}
       li.appendChild(rspan);
+      if (deltaSpan) li.appendChild(deltaSpan);
     }
     if (currentPairIds && (p.id === currentPairIds[0] || p.id === currentPairIds[1])) li.classList.add('comparing');
     listEl.appendChild(li);
@@ -600,10 +616,18 @@ function initElo(items) {
   state.sorter.cache = {}; state.sorter.ties = {}; state.sorter.undo = [];
   const ids = idsOf(items);
   const basePairs = estimateEloPairTarget(ids.length);
-  const extra = Math.max(0, Math.round(0.25 * basePairs)); // add 25% extra refinement matches
-  const elo = { ratings: {}, kFactor: 32, pairsDone: 0, totalPairs: basePairs + extra, queue: [] };
+  // adjust intensity
+  const intensity = state.sorter.eloIntensity || 'balanced';
+  let multiplier = 1.0; let kFactor = 32;
+  if (intensity === 'fast') { multiplier = 0.6; kFactor = 40; }
+  else if (intensity === 'balanced') { multiplier = 1.0; kFactor = 32; }
+  else if (intensity === 'accurate') { multiplier = 1.5; kFactor = 24; }
+  const extra = Math.max(0, Math.round((multiplier - 1) * basePairs));
+  const elo = { ratings: {}, kFactor, pairsDone: 0, totalPairs: basePairs + extra, queue: [], history: {} };
   // init ratings
   ids.forEach(id => { elo.ratings[id] = 1000; });
+  // init history
+  ids.forEach(id => { elo.history[id] = [1000]; });
   // seed queue with a shuffled round-robin cycle to ensure broad coverage initially
   const cycles = Math.max(2, Math.ceil(Math.log2(Math.max(2, ids.length))));
   for (let c = 0; c < cycles; c++) {
@@ -680,6 +704,9 @@ async function continueElo() {
     const Sb = isTie ? 0.5 : (res < 0 ? 1 : 0);
     elo.ratings[a.id] = eloUpdate(ra, Sa, Ea, k);
     elo.ratings[b.id] = eloUpdate(rb, Sb, Eb, k);
+  // record history (cap to 10)
+  (elo.history[a.id] ||= []).push(Math.round(elo.ratings[a.id])); if (elo.history[a.id].length > 10) elo.history[a.id].shift();
+  (elo.history[b.id] ||= []).push(Math.round(elo.ratings[b.id])); if (elo.history[b.id].length > 10) elo.history[b.id].shift();
     elo.pairsDone++;
     // Occasionally add comparisons across the spectrum
     if (elo.pairsDone % 7 === 0) {
@@ -1241,6 +1268,13 @@ function applyStateOnLoad(loadedData) {
       try { await startSortingElo(); }
       catch (err) { console.error(err); toast('Start (ELO) failed', { error: true }); }
     });
+  }
+  // ELO intensity selector wiring
+  const eloSelect = $('#elo-intensity');
+  if (eloSelect) {
+    // set initial value from state
+    eloSelect.value = state.sorter.eloIntensity || 'balanced';
+    eloSelect.onchange = () => { state.sorter.eloIntensity = eloSelect.value; saveState(); };
   }
   // Repair button: run sanitizer and show before/after counts
   const btnRepair = $('#btn-repair');

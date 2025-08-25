@@ -99,6 +99,18 @@ body {
 .live-item .rankno { width: 2.5ch; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
 .live-item.comparing { color: var(--text); font-weight: 600; }
 .elo-rating { margin-left: auto; color: var(--muted); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.welcome-elo-settings .input { display: inline-block; vertical-align: middle; }
+.rating-delta { margin-left: .5rem; font-size: .8rem; color: var(--muted); }
+.rating-delta {
+  margin-left: 6px;
+  font-size: 0.8em;
+  color: #2b8a3e;
+  background: rgba(43,138,62,0.08);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+.rating-delta[title] { cursor: help; }
+.elo-tooltip { font-size: .85rem; color: var(--muted); }
 
 .tier-actions { display:flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
 
