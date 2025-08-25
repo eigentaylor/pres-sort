@@ -69,7 +69,7 @@ function seededRandom(seed) {
 
 function seededShuffle(array, seed) {
     console.log('seededShuffle: before shuffle array', array);
-    const rand = seededRandom(seed);
+    const rand = seededRandom();
     const a = [];
     if (Array.isArray(array)) {
       for (let i = 0; i < array.length; i++) {
@@ -77,10 +77,12 @@ function seededShuffle(array, seed) {
         if (v && typeof v === 'object' && v.id) a.push(v);
       }
     }
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      if (a[i] && a[j]) {
-        [a[i], a[j]] = [a[j], a[i]];
+    for (let n = 0; n < 2 + Math.floor(rand() * 3); n++) { // Run the shuffle process between 2 and 4 times
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        if (a[i] && a[j]) {
+          [a[i], a[j]] = [a[j], a[i]];
+        }
       }
     }
     console.log('seededShuffle: after shuffle', a);
