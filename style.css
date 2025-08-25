@@ -115,17 +115,43 @@ body {
 .tier-actions { display:flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
 
 .tier-board { display: grid; gap: .75rem; grid-template-columns: 1fr; }
-@media (min-width: 900px) { .tier-board { grid-template-columns: repeat(7, 1fr); } }
+@media (min-width: 900px) { .tier-board { grid-template-columns: repeat(8, 1fr); } }
 
 .tier-col { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; display:grid; grid-template-rows: auto 1fr; min-height: 220px; }
 .tier-col header { padding: .5rem .75rem; font-weight: 700; background: #0c1016; border-bottom: 1px solid var(--border); display:flex; align-items:center; justify-content: space-between; }
 .tier-col .list { padding: .5rem; display: grid; gap: .5rem; align-content: start; }
 
-.tier-item { display:flex; align-items:center; gap: .5rem; padding: .4rem; background: #0c1118; border: 1px solid var(--border); border-radius: 10px; cursor: grab; box-shadow: var(--shadow); }
+.tier-item { display:flex; flex-direction: column; align-items:center; justify-content:flex-start; gap: .25rem; padding: 6px 4px; background: transparent; border: none; border-radius: 6px; cursor: grab; position: relative; }
 .tier-item:active { cursor: grabbing; }
-.tier-item img { width: 40px; height: 50px; object-fit: cover; border-radius: 6px; background: #0a0d12; }
-.tier-item .name { font-weight: 600; }
-.tier-item .pres-number.small { margin-left: auto; opacity: .85; }
+.tier-img-wrap { width: 56px; height: 70px; display: grid; place-items: center; background: #0c1118; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); overflow: visible; }
+.tier-img-wrap img { width: 100%; height: 100%; object-fit: cover; display:block; }
+.tier-item .name { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.tier-item .pres-number.small { display: none; }
+
+/* Overlay with name shown on hover/focus */
+.tier-caption {
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%) translateY(8px) scaleY(0.96);
+  white-space: nowrap;
+  padding: 6px 8px;
+  background: rgba(0,0,0,0.88);
+  color: #fff;
+  font-weight: 600;
+  font-size: .82rem;
+  text-align: center;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity .14s ease, transform .16s cubic-bezier(.2,.8,.2,1);
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  z-index: 6;
+}
+/* Show caption only when the tile is hovered or focused. It pops out beneath the image without resizing the tile. */
+.tier-item:hover .tier-caption,
+.tier-item:focus .tier-caption,
+.tier-item:focus-within .tier-caption { opacity: 1; transform: translateX(-50%) translateY(0) scaleY(1); pointer-events: auto; }
 
 .tier-search { margin-top: 1rem; }
 
@@ -139,6 +165,6 @@ body {
 @media print {
   body { background: #fff; color: #000; }
   .site-header, .site-footer, .tier-actions, .tier-search, .sticky-actions { display:none; }
-  .tier-board { grid-template-columns: repeat(7, 1fr); }
+  .tier-board { grid-template-columns: repeat(8, 1fr); }
   .tier-col { break-inside: avoid; }
 }

@@ -1028,7 +1028,7 @@ function buildTierBoard() {
   $('#tier-filter').oninput = (e) => {
     const q = e.target.value.toLowerCase().trim();
     $$('.tier-item').forEach(el => {
-      const name = el.querySelector('.name').textContent.toLowerCase();
+      const name = (el.dataset.name || '').toLowerCase();
       el.style.display = name.includes(q) ? '' : 'none';
     });
   };
@@ -1119,35 +1119,47 @@ function applyCutoffsToTiers() {
 
 function makeTierItem(person) {
   const el = document.createElement('div'); el.className = 'tier-item'; el.dataset.id = person.id;
-  const imgWrap = document.createElement('div'); imgWrap.style.width = '40px'; imgWrap.style.height = '50px';
+  const imgWrap = document.createElement('div'); imgWrap.className = 'tier-img-wrap';
   const candidates = person._resolved ? [person._resolved] : resolveImageSrc(person);
   (async () => {
     let loaded = false;
     for (const src of candidates) {
       console.debug('makeTierItem: trying', person.id, src);
       await new Promise(res => {
-  const i = new Image(); i.width = 40; i.height = 50; i.alt = `Portrait of ${person.name}`; i.loading = 'eager'; i.decoding = 'async';
-  i.onload = () => { if (!loaded) { i.className = 'tier-img'; try { imgWrap.innerHTML=''; } catch(e){} imgWrap.appendChild(i); try { imgWrap.style.backgroundImage = `url(${src})`; imgWrap.style.backgroundSize = 'cover'; imgWrap.style.backgroundPosition = 'center'; } catch(e){} try { person._resolved = src; } catch(_){} loaded = true; } res(true); };
+  const i = new Image(); i.alt = `Portrait of ${person.name}`; i.loading = 'eager'; i.decoding = 'async';
+  i.onload = () => { if (!loaded) { i.className = 'tier-img'; try { imgWrap.innerHTML=''; } catch(e){} imgWrap.appendChild(i); try { person._resolved = src; } catch(_){} loaded = true; } res(true); };
   i.onerror = () => res(false);
   i.src = src;
       }).then(ok => { if (ok) console.debug('makeTierItem: loaded', person.id, src); else console.debug('makeTierItem: not loaded', person.id, src); });
       if (loaded) break;
     }
     if (!loaded) {
-      const ph = document.createElement('div'); ph.className = 'placeholder'; ph.style.width = '100%'; ph.style.height = '100%';
+      const ph = document.createElement('div'); ph.className = 'placeholder';
       const initials = (person.name.match(/\b([A-Z])[A-Za-z]+/g) || []).map(s => s[0]).slice(0,2).join('');
-      ph.textContent = initials || '👤';
+      ph.textContent = initials || '\ud83d\udc64';
       imgWrap.innerHTML = ''; imgWrap.appendChild(ph);
     }
   })();
-  const name = document.createElement('div'); name.className = 'name'; name.textContent = person.name;
-  if (person.number != null) {
-  const num = document.createElement('span'); num.className = 'pres-number small';
-  if (person.id === 'cleveland') num.textContent = '#22 and #24';
-  else if (person.id === 'trump') num.textContent = '#45 and #47';
-  else num.textContent = `#${person.number}`;
-    el.append(imgWrap, name, num);
-  } else el.append(imgWrap, name);
+  // For a cleaner visual tier list, show only the image tile.
+  // Keep name for accessibility and filtering, and show it on hover/focus via an overlay.
+  el.dataset.name = person.name || '';
+  el.title = person.name || '';
+  el.setAttribute('aria-label', person.name || '');
+  // make focusable for keyboard users so overlay can appear on focus
+  el.tabIndex = 0;
+
+  // caption element that will pop out below the image on hover
+  let captionText = person.name || '';
+//   if (person.number != null) {
+//     if (person.id === 'cleveland') captionText += ' — #22 & #24';
+//     else if (person.id === 'trump') captionText += ' — #45 & #47';
+//     else captionText += ` — #${person.number}`;
+//   }
+  const caption = document.createElement('div');
+  caption.className = 'tier-caption';
+  caption.textContent = captionText;
+
+  el.append(imgWrap, caption);
   return el;
 }
 
@@ -1162,10 +1174,28 @@ async function exportPNG() {
   const el = $('#tier-board');
   const scale = 2;
   const backgroundColor = $('#png-transparent').checked ? null : '#ffffff';
-  const canvas = await html2canvas(el, { scale, backgroundColor });
-  canvas.toBlob(blob => {
-    download('presidential_tiers.png', blob, 'image/png');
-  });
+  // If Unplaced column exists but is empty, hide it for the export so it's not included in PNG.
+  const unplacedCol = el.querySelector('.tier-col[data-tier="Unplaced"]');
+  let prevDisplay = null;
+  let hid = false;
+  try {
+    if (unplacedCol) {
+      const list = unplacedCol.querySelector('.list');
+      if (!list || list.children.length === 0) {
+        prevDisplay = unplacedCol.style.display;
+        unplacedCol.style.display = 'none';
+        hid = true;
+      }
+    }
+    const canvas = await html2canvas(el, { scale, backgroundColor, useCORS: true });
+    canvas.toBlob(blob => {
+      download('presidential_tiers.png', blob, 'image/png');
+    });
+  } finally {
+    if (hid && unplacedCol) {
+      unplacedCol.style.display = prevDisplay || '';
+    }
+  }
 }
 
 function exportJSON() {
