@@ -90,6 +90,7 @@ body {
 .results-list { list-style: none; padding-left: 0; display: grid; gap: .35rem; }
 .results-list .rankno { width: 2.5ch; display: inline-block; text-align: right; font-variant-numeric: tabular-nums; margin-right: .25rem; }
 .results-list .tie { color: var(--muted); margin-left: .5rem; font-size: .9rem; }
+.results-list .elo-final { margin-left: auto; color: var(--muted); font-size: .95rem; }
 
 /* Live ranking panel */
 .live-panel { margin-top: 1rem; }

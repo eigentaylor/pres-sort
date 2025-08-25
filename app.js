@@ -599,7 +599,9 @@ function initElo(items) {
   state.sorter.stack = null;
   state.sorter.cache = {}; state.sorter.ties = {}; state.sorter.undo = [];
   const ids = idsOf(items);
-  const elo = { ratings: {}, kFactor: 32, pairsDone: 0, totalPairs: estimateEloPairTarget(ids.length), queue: [] };
+  const basePairs = estimateEloPairTarget(ids.length);
+  const extra = Math.max(0, Math.round(0.25 * basePairs)); // add 25% extra refinement matches
+  const elo = { ratings: {}, kFactor: 32, pairsDone: 0, totalPairs: basePairs + extra, queue: [] };
   // init ratings
   ids.forEach(id => { elo.ratings[id] = 1000; });
   // seed queue with a shuffled round-robin cycle to ensure broad coverage initially
@@ -611,6 +613,8 @@ function initElo(items) {
     }
   }
   state.sorter.elo = elo;
+  // expose for progress display
+  state.sorter.totalComparisons = elo.totalPairs;
   pushUndoSnapshot();
   saveState();
 }
@@ -928,9 +932,29 @@ function renderResults(list) {
     const num = document.createElement('span'); num.className = 'rankno'; num.textContent = `${rank}.`;
     const name = document.createElement('span'); name.textContent = ' ' + p.name;
     li.append(num, name);
+    if (state.sorter.mode === 'elo' && state.sorter.elo && state.sorter.elo.ratings) {
+      const r = Math.round(state.sorter.elo.ratings[p.id] || 0);
+      const rspan = document.createElement('span'); rspan.className = 'elo-final'; rspan.textContent = String(r);
+      li.appendChild(rspan);
+    }
     ol.appendChild(li);
   }
 }
+
+// Restart but keep loaded data: clears sorter and returns to welcome so user can choose mode again
+function restartKeepData() {
+  // preserve state.data and tiers but remove sorter progress
+  const savedData = Array.isArray(state.data) ? state.data : [];
+  state = defaultState();
+  state.data = savedData;
+  state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+  saveState();
+  showScreen('screen-welcome');
+}
+
+  // Restart button in results
+  const btnRestart = $('#btn-restart');
+  if (btnRestart) btnRestart.onclick = () => { if (confirm('Restart sorting with a fresh run?')) restartKeepData(); };
 
 // --- Tier Board -------------------------------------------------------------
 const TIER_ORDER = ['SS','S','A','B','C','D','F','Unplaced'];
