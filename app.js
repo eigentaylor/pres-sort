@@ -934,7 +934,7 @@ function renderResults(list) {
     li.append(num, name);
     if (state.sorter.mode === 'elo' && state.sorter.elo && state.sorter.elo.ratings) {
       const r = Math.round(state.sorter.elo.ratings[p.id] || 0);
-      const rspan = document.createElement('span'); rspan.className = 'elo-final'; rspan.textContent = String(r);
+      const rspan = document.createElement('span'); rspan.className = 'elo-final'; rspan.textContent = ` ${r}`;
       li.appendChild(rspan);
     }
     ol.appendChild(li);
