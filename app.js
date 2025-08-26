@@ -182,6 +182,7 @@ async function preflightImages(data) {
 const defaultState = () => ({
   version: APP_VERSION,
   seed: getSeed(),
+  useHistorian: true,
   dataVersion: 1,
   timestamp: Date.now(),
   screen: 'welcome',
@@ -416,6 +417,14 @@ function computeProvisionalRanking() {
   const st = state?.sorter?.stack;
   const idMap = new Map(state.data.map(p => [p.id, p]));
   if (!st) return state.sorter.result || [];
+  // Support both merge-stack and insertion-stack shapes
+  if (st.mode === 'insertion') {
+    const resIds = Array.isArray(st.result) ? st.result.slice() : [];
+  const listIds = Array.isArray(st.provisionalOrder) ? st.provisionalOrder.slice() : resIds.slice().concat(Array.isArray(st.pending) ? st.pending.slice() : []);
+  const ids = listIds;
+    return ids.map(id => idMap.get(id)).filter(Boolean);
+  }
+  // fallback: assume merge-style stack
   const N = st.arr.length;
   const blockEnd = Math.min(N, st.i + 2 * st.width);
   const before = st.arr.slice(0, st.i);
@@ -459,6 +468,10 @@ function renderLiveRanking(currentPairIds = null) {
     }
     const num = document.createElement('span'); num.className = 'rankno'; num.textContent = `${rank}.`;
     const name = document.createElement('span'); name.textContent = ' ' + p.name;
+    // If this id is part of the current comparison, add a visual bold class but keep position
+    if (currentPairIds && (p.id === currentPairIds[0] || p.id === currentPairIds[1])) {
+      name.classList.add('comparing-bold');
+    }
     li.append(num, name);
     // If in ELO mode, show rounded rating to the right
     if (state.sorter.mode === 'elo' && state.sorter.elo && state.sorter.elo.ratings) {
@@ -586,23 +599,23 @@ function idsOf(list) {
 function objsOf(ids, idMap) { return ids.map(id => idMap.get(id)).filter(Boolean); }
 
 function initSort(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    console.error('initSort: invalid items', items);
-    throw new Error('No items to sort');
-  }
+  if (!Array.isArray(items) || items.length === 0) throw new Error('No items to sort');
+  // We'll use binary insertion: build an ordered array progressively by inserting each candidate
   state.sorter.active = true;
   state.sorter.result = null;
+  // stack holds: mode:'insertion', result: [ids inserted so far], pending: [ids left to insert], i: current index
   state.sorter.stack = {
-    width: 1,
+    mode: 'insertion',
+    result: [],
+    pending: idsOf(items).slice(),
     i: 0,
-    arr: idsOf(items).filter(Boolean),
-    L: [], R: [], out: [],
-    li: 0, rj: 0,
+  lo: 0, hi: 0, // current binary search bounds for insertion
+  current: null, // id being inserted now
+  probe: null,   // current probe id
   };
-  // precompute total comparisons for display
-  const n = state.sorter.stack.arr.length;
+  const n = state.sorter.stack.pending.length;
+  // Use binary-insertion theoretical upper bound for comparisons as totalComparisons estimate
   state.sorter.totalComparisons = totalComparisonUpperBound(n);
-  // reset undo and seed with initial snapshot
   state.sorter.undo = [];
   pushUndoSnapshot();
   saveState();
@@ -781,9 +794,11 @@ function restoreFromUndo() {
       const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
       updateProgress(pct);
     } else if (state.sorter.stack) {
-      const n = Array.isArray(state.sorter.stack.arr) ? state.sorter.stack.arr.length : 0;
+      // For insertion mode, we already set a totalComparisons upper bound when initializing the stack.
       const donePairs = countUniqueCachePairs(state.sorter.cache || {});
-      updateProgress(estimateProgress(n, donePairs));
+      const total = state.sorter.totalComparisons || 0;
+      const pct = total > 0 ? Math.min(100, (donePairs / total) * 100) : 0;
+      updateProgress(pct);
     } else {
       updateProgress(0);
     }
@@ -794,161 +809,137 @@ function restoreFromUndo() {
 
 async function continueSort() {
   const prefer = makePrefer();
-  const idMap = new Map(state.data.map(p => [p.id, p]));
-  const st = state.sorter.stack;
+  // idMap may need to be rebound after an undo restores state.data or stack
+  let idMap = new Map(state.data.map(p => [p.id, p]));
+  let st = state.sorter.stack;
   if (!st) return;
 
-  const N = st.arr.length;
-  const estimate = () => updateProgress(estimateProgress(N, countUniqueCachePairs(state.sorter.cache)));
-
-  while (st.width < N) {
-    if (st.i >= st.arr.length) { st.width *= 2; st.i = 0; continue; }
-
-    // Prepare L,R if empty
-    if (st.L.length === 0 && st.R.length === 0) {
-      const arrObjs = objsOf(st.arr, idMap);
-  const L = arrObjs.slice(st.i, st.i + st.width).filter(Boolean);
-  const R = arrObjs.slice(st.i + st.width, st.i + 2 * st.width).filter(Boolean);
-  st.L = idsOf(L).filter(Boolean);
-  st.R = idsOf(R).filter(Boolean);
-      st.out = [];
-      st.li = 0; st.rj = 0;
+  // If stack.mode isn't insertion, fall back to finishing result
+  if (st.mode !== 'insertion') {
+    // attempt to convert old merge-stack to result
+    if (Array.isArray(st.arr)) {
+      const result = objsOf(st.arr, idMap);
+      state.sorter.result = result; state.sorter.active = false; state.sorter.stack = null; saveState(); renderResults(result); showScreen('screen-results'); return;
     }
+    return;
+  }
 
-    // If R is empty (odd tail), fast-forward this block
-    if (st.R.length === 0) {
-      const merged = st.L.slice();
-      // splice back into arr
-      const before = st.arr.slice(0, st.i);
-      const after = st.arr.slice(st.i + st.L.length);
-      st.arr = before.concat(merged, after);
-      st.L = []; st.R = []; st.out = []; st.li = 0; st.rj = 0;
-      st.i += 2 * st.width;
-      saveState();
-      estimate();
-      continue;
-    }
+  const estimate = () => {
+    const donePairs = countUniqueCachePairs(state.sorter.cache || {});
+    const total = state.sorter.totalComparisons || 0;
+    const pct = total > 0 ? Math.min(100, (donePairs / total) * 100) : 0;
+    updateProgress(pct);
+  };
 
-    // While both have elements, ask user
-    while (st.li < st.L.length && st.rj < st.R.length) {
-  let a = idMap.get(st.L[st.li]);
-  let b = idMap.get(st.R[st.rj]);
-  if (!a) { console.warn('continueSort: invalid L entry, skipping', st.L[st.li]); st.li++; continue; }
-  if (!b) { console.warn('continueSort: invalid R entry, skipping', st.R[st.rj]); st.rj++; continue; }
-      // Guard: if a and b are the same due to corrupted arrays, advance right index
-      if (a && b && a.id === b.id) {
-        console.warn('continueSort: detected self-match, advancing right index', a.id);
-        st.rj++;
-        if (st.rj >= st.R.length) break;
-        b = idMap.get(st.R[st.rj]);
+  // Main insertion loop
+  while (st && ((st.pending && st.pending.length > 0) || st.current)) {
+    // Start a new candidate if none active
+    if (!st.current) {
+      pushUndoSnapshot();
+      const nextId = st.pending.shift();
+      if (!nextId) break;
+      st.current = nextId;
+      // capture the provisional ordering (result followed by the current candidate and remaining pending)
+      try {
+        st.provisionalOrder = (Array.isArray(st.result) ? st.result.slice() : []).concat([st.current]).concat(Array.isArray(st.pending) ? st.pending.slice() : []);
+      } catch (e) { st.provisionalOrder = null; }
+      st.lo = 0; st.hi = st.result.length;
+      // fast path: empty result
+      if (st.hi === 0) {
+        st.result.push(st.current);
+        st.current = null; st.probe = null;
+        saveState();
+        try { renderLiveRanking(); } catch {}
+        continue;
       }
-      estimate();
-  // Capture pre-decision snapshot so Back returns to this exact state
-  pushUndoSnapshot();
-  const btnBackNow = document.getElementById('choose-back');
-  if (btnBackNow) btnBackNow.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
-  let res = await prefer(a, b);
-    if (res === 'BACK') {
-        // restore previous snapshot and restart inner loop to show prior pair
-        const ok = restoreFromUndo();
-        if (ok) {
-          // refresh local reference to st after restoration
-          // Note: state.sorter.stack object identity updated; rebind st
-          Object.assign(st, state.sorter.stack);
-          // Keep state.sorter.stack pointing to our working object
-          state.sorter.stack = st;
-      const btnBackAfter = document.getElementById('choose-back');
-      if (btnBackAfter) btnBackAfter.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+    }
+
+    // If we have active current, continue binary search
+    if (st.lo < st.hi) {
+      const mid = Math.floor((st.lo + st.hi) / 2);
+      // pick a probe that is not the same id as current; search nearby indices if needed
+      let probeIndex = mid;
+      let probeId = st.result[probeIndex];
+      if (probeId === st.current) {
+        // search outwards for the nearest index that isn't the same as current
+        let left = probeIndex - 1;
+        let right = probeIndex + 1;
+        let found = -1;
+        while (left >= st.lo || right < st.hi) {
+          if (left >= st.lo && st.result[left] !== st.current) { found = left; break; }
+          if (right < st.hi && st.result[right] !== st.current) { found = right; break; }
+          left--; right++;
         }
+        if (found === -1) {
+          // no valid probe available inside bounds; force insertion without prompting
+          st.hi = st.lo; // force exit to insertion
+          continue;
+        }
+        probeIndex = found;
+        probeId = st.result[probeIndex];
+      }
+      st.probe = probeId;
+      const a = idMap.get(st.current);
+      const b = idMap.get(probeId);
+      if (!a || !b) {
+        // adjust bounds safely if either side missing
+        if (!b) { st.hi = mid; } else { st.lo = mid + 1; }
+        continue;
+      }
+      pushUndoSnapshot();
+      try { renderLiveRanking([st.current, probeId]); } catch {}
+      const res = await prefer(a, b);
+      if (res === 'BACK') {
+        const ok = restoreFromUndo();
+        if (!ok) return; // nothing to undo
+        // rebind local references from restored state and refresh UI before resuming
+        st = state.sorter.stack;
+        idMap = new Map(state.data.map(p => [p.id, p]));
+        try { renderLiveRanking(); } catch {}
+        // go to top of loop to pick up restored state cleanly
         continue;
       }
       if (res === null) {
-        // If both sides have exactly one candidate left, treat skip as a temporary tie to advance.
-        const lRem = st.L.length - st.li;
-        const rRem = st.R.length - st.rj;
-        if (lRem === 1 && rRem === 1) {
-          console.debug('continueSort: skip on 1v1 -> treating as tie to advance');
-          st.out.push(st.L[st.li]); st.li++;
-          saveState();
-        } else {
-          // Otherwise, rotate current elements to the end to show a new pair
-          const liIdx = st.li; const rjIdx = st.rj;
-          let lval = null, rval = null;
-          if (liIdx >= 0 && liIdx < st.L.length) lval = st.L.splice(liIdx, 1)[0];
-          if (rjIdx >= 0 && rjIdx < st.R.length) rval = st.R.splice(rjIdx, 1)[0];
-          if (lval != null) st.L.push(lval);
-          if (rval != null) st.R.push(rval);
-          console.debug('continueSort: skip rotated, pushed', { lval: !!lval, rval: !!rval, liIdx, rjIdx });
-          saveState();
-        }
-        // Force-render the next pair immediately so UI reflects the change
-        try {
-          const nextA = idMap.get(st.L[st.li]);
-          const nextB = idMap.get(st.R[st.rj]);
-          console.debug('continueSort: next pair after skip', { a: nextA && nextA.id, b: nextB && nextB.id });
-          const leftEl = $('#card-left'); const rightEl = $('#card-right');
-          if (leftEl && rightEl) {
-            try {
-              // Create replacement nodes to force a full DOM swap (stronger than innerHTML)
-              const newLeft = document.createElement(leftEl.tagName.toLowerCase());
-              newLeft.className = leftEl.className; newLeft.id = leftEl.id; newLeft.setAttribute('aria-live', leftEl.getAttribute('aria-live') || 'polite');
-              const newRight = document.createElement(rightEl.tagName.toLowerCase());
-              newRight.className = rightEl.className; newRight.id = rightEl.id; newRight.setAttribute('aria-live', rightEl.getAttribute('aria-live') || 'polite');
-              if (nextA) renderCard(newLeft, nextA); else newLeft.innerHTML = '';
-              if (nextB) renderCard(newRight, nextB); else newRight.innerHTML = '';
-              leftEl.parentNode.replaceChild(newLeft, leftEl);
-              rightEl.parentNode.replaceChild(newRight, rightEl);
-              // log preview and flash
-              console.debug('continueSort: replaced left/right nodes - previews', newLeft.innerHTML.slice(0,200), newRight.innerHTML.slice(0,200));
-              // stronger visual nudge: brief scale + shadow, scroll and focus
-              try {
-                [newLeft, newRight].forEach(n => {
-                  n.style.transition = 'transform .12s ease, box-shadow .25s ease, opacity .05s';
-                  n.style.transform = 'scale(0.995)';
-                });
-                requestAnimationFrame(() => {
-                  [newLeft, newRight].forEach(n => {
-                    n.style.transform = 'scale(1)';
-                    n.style.boxShadow = '0 0 0 6px rgba(78,161,255,0.18)';
-                  });
-                });
-                setTimeout(() => { [newLeft, newRight].forEach(n => { n.style.boxShadow = ''; n.style.transition=''; n.style.transform=''; }); }, 380);
-                try { newLeft.scrollIntoView({behavior: 'smooth', block: 'center'}); newLeft.focus && newLeft.focus(); } catch (e) {}
-              } catch(e) { console.debug('continueSort: visual nudge failed', e); }
-              toast('Skipped — pair rotated', {});
-            } catch (e) { console.debug('continueSort: node-replace failed', e); }
-          }
-        } catch (e) { console.warn('continueSort: failed to force-render after skip', e); }
-        continue; // re-render next pair
+        // Treat as tie: insert at mid
+        st.lo = mid;
+        // fall through to insertion after loop condition
+        st.hi = st.lo; // force exit
+      } else if (res > 0) {
+        // a > b => before b
+        st.hi = mid;
+      } else {
+        // a < b => after b
+        st.lo = mid + 1;
       }
-      if (res >= 0) { st.out.push(st.L[st.li]); st.li++; }
-      else { st.out.push(st.R[st.rj]); st.rj++; }
-  saveState();
-  // Refresh live ranking after each decision
-  try { renderLiveRanking(); } catch (_) {}
+      saveState();
+      estimate();
+      try { renderLiveRanking(); } catch {}
+      continue;
     }
 
-    // Append remaining
-    while (st.li < st.L.length) { st.out.push(st.L[st.li++]); }
-    while (st.rj < st.R.length) { st.out.push(st.R[st.rj++]); }
-
-  // Splice merged run back; compute original segment length
-  const segLen = st.out.length + (st.L.length - st.li) + (st.R.length - st.rj);
-  const before = st.arr.slice(0, st.i);
-  const after = st.arr.slice(st.i + segLen);
-    st.arr = before.concat(st.out, after);
-    st.L = []; st.R = []; st.out = []; st.li = 0; st.rj = 0;
-    st.i += 2 * st.width;
-    saveState();
+    // Insert at position lo
+    if (st.current != null) {
+      // remove if already present to avoid duplicates
+      const existing = st.result.indexOf(st.current);
+      if (existing >= 0) st.result.splice(existing, 1);
+      const pos = Math.max(0, Math.min(st.result.length, st.lo|0));
+      st.result.splice(pos, 0, st.current);
+  st.current = null; st.probe = null;
+  // clear provisional snapshot now that insertion completed
+  st.provisionalOrder = null;
+      saveState();
+  try { renderLiveRanking(); } catch {}
+  // update back button enabled state after a concrete step
+  const btnBackNow = document.getElementById('choose-back'); if (btnBackNow) btnBackNow.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+    }
   }
 
-  // Done
-  const result = objsOf(st.arr, idMap);
+  // finished
+  const result = objsOf(st.result || [], idMap);
   state.sorter.active = false;
   state.sorter.result = result;
   state.sorter.stack = null;
-  const btnBackEnd = document.getElementById('choose-back');
-  if (btnBackEnd) btnBackEnd.disabled = true;
+  const btnBackEnd = document.getElementById('choose-back'); if (btnBackEnd) btnBackEnd.disabled = true;
   updateProgress(100);
   saveState();
   renderResults(result);
@@ -956,10 +947,9 @@ async function continueSort() {
 }
 
 function estimateProgress(n, uniquePairCount) {
-  // Tighter upper bound for number of comparisons in merge sort:
-  // total <= n*ceil(log2 n) - (2^ceil(log2 n) - 1)
+  // For insertion mode we estimate total comparisons as n*log2(n); caller may pass uniquePairCount
   if (n <= 1) return 100;
-  const total = totalComparisonUpperBound(n);
+  const total = Math.max(1, Math.round(n * Math.log2(Math.max(2, n))));
   const pct = Math.min(100, total > 0 ? (uniquePairCount / total) * 100 : 0);
   return pct;
 }
@@ -1319,6 +1309,13 @@ function applyStateOnLoad(loadedData) {
       catch (err) { console.error(err); toast('Start failed', { error: true }); }
     });
   }
+  // historian checkbox wiring
+  const historianCheckbox = $('#use-historian');
+  if (historianCheckbox) {
+    // initialize from state
+    historianCheckbox.checked = state.useHistorian !== false;
+    historianCheckbox.onchange = () => { state.useHistorian = historianCheckbox.checked; saveState(); };
+  }
   const btnStartElo = $('#btn-start-elo');
   if (btnStartElo) {
     btnStartElo.disabled = false;
@@ -1412,7 +1409,7 @@ function applyStateOnLoad(loadedData) {
 }
 
 async function startSorting() {
-  // Build the candidate list, shuffled by seed
+  // Build the candidate list. If "Use Historian Ranking Seed" selected, try to order by historical_ranking.csv
   try {
   // Fresh run: clear persisted state and reset in-memory state to defaults
   clearState();
@@ -1431,11 +1428,67 @@ async function startSorting() {
   saveState();
   if (source.length === 0) throw new Error('No valid candidates available');
   if (source.length !== (fresh || []).length) console.warn('startSorting: removed invalid entries from data source', (fresh || []).length - source.length);
-  // Defensive snapshot: log a copy so DevTools shows exact snapshot at this moment
-  console.log('seededShuffle: initial snapshot (copy)', source.slice());
-  const items = seededShuffle(source, state.seed);
-  console.log('seededShuffle: items snapshot (copy)', items.slice());
-  console.log('startSorting: items sample', items.slice(0,6));
+  // If user opted to use historian ordering, attempt to load the CSV and order accordingly; fall back to seeded shuffle.
+  let items = null;
+  console.log('startSorting: state.useHistorian', state.useHistorian);
+  if (state.useHistorian) {
+    console.log('startSorting: attempting to load historian CSV for ordering');
+    try {
+      const csvText = await fetch('historical_ranking.csv').then(r => r.ok ? r.text() : Promise.reject('no csv'));
+      const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const header = lines.shift();
+      const cols = header.split(',').map(h => h.trim().toLowerCase());
+      const idxId = cols.indexOf('id');
+      const idxName = cols.indexOf('name');
+      const idxNumber = cols.indexOf('number');
+      const order = [];
+      for (const line of lines) {
+        const parts = line.split(',');
+        if (parts.length < 1) continue;
+        const csvId = idxId >= 0 && parts[idxId] ? parts[idxId].trim() : null;
+        const name = idxName >= 0 && parts[idxName] ? parts[idxName].trim() : null;
+        const number = idxNumber >= 0 && parts[idxNumber] ? parts[idxNumber].trim() : null;
+        // Prefer explicit id if present
+        if (csvId) {
+          const byId = source.find(p => p.id === csvId);
+          if (byId) { order.push(byId); continue; }
+        }
+        // try to find by name first, then by number
+        if (name) {
+          const byName = source.find(p => p.name && p.name.toLowerCase() === name.toLowerCase());
+          if (byName) { order.push(byName); continue; }
+        }
+        if (number) {
+          const numNormalized = Number(String(number).split('/')[0]) || null;
+          if (numNormalized) {
+            const byNum = source.find(p => Number(p.number) === numNormalized);
+            if (byNum) { order.push(byNum); continue; }
+          }
+        }
+      }
+      // If we've captured at least half of candidates, adopt this ordering and append missing ones
+      if (order.length >= Math.max(1, Math.floor(source.length / 2))) {
+        const seen = new Set(order.map(p => p.id));
+        const rest = source.filter(p => !seen.has(p.id));
+        items = order.concat(rest);
+        console.log('startSorting: using historian ordering with', order.length, 'seeded entries');
+      } else {
+        console.warn('startSorting: historian CSV parsed but not enough matches, falling back to seeded shuffle');
+      }
+    } catch (e) {
+      console.warn('startSorting: failed to load/parse historical_ranking.csv', e);
+    }
+  }
+  else {
+    console.log('startSorting: no historian ordering available, falling back to seeded shuffle');
+  }
+  if (!items) {
+    console.log('seededShuffle: initial snapshot (copy)', source.slice());
+    items = seededShuffle(source, state.seed);
+    console.log('seededShuffle: items snapshot (copy)', items.slice());
+    console.log('startSorting: items sample', items.slice(0,6));
+  }
+  // Use binary insertion interactive sort instead of merge sort
   initSort(items);
     showScreen('screen-sorter');
   updateProgress(estimateProgress(items.length, countUniqueCachePairs(state.sorter.cache)));

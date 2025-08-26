@@ -39,12 +39,15 @@
       <p>This tool lets you sort U.S. presidents via pairwise choices and then build a custom SS–F tier list. All data stays on your device. You can export or share your state any time.</p>
       <div class="welcome-actions">
         <button id="btn-start" class="btn primary">Start Sorting</button>
-        <button id="btn-start-elo" class="btn primary">Start Sorting (ELO)</button>
+        <label style="display:inline-flex;align-items:center;gap:.5rem;margin-left:1rem">
+          <input id="use-historian" type="checkbox" checked /> Use Historian Ranking Seed
+        </label>
+        <!-- <button id="btn-start-elo" class="btn primary">Start Sorting (ELO)</button> -->
         <button id="btn-resume" class="btn" hidden>Resume</button>
         <button id="btn-skip-to-tiers" class="btn" hidden>Skip to Tier Board</button>
   <!-- <button id="btn-repair" class="btn">Repair State</button> -->
       </div>
-      <div class="welcome-elo-settings" style="margin-top:.5rem">
+      <!-- <div class="welcome-elo-settings" style="margin-top:.5rem">
         <label style="display:inline-flex;align-items:center;gap:.5rem">ELO intensity:
           <select id="elo-intensity" class="input" style="width:10rem">
             <option value="fast">Fast (fewer matches)</option>
@@ -52,7 +55,7 @@
             <option value="accurate">Accurate (more matches)</option>
           </select>
         </label>
-      </div>
+      </div> -->
     </section>
 
     <section id="screen-sorter" class="screen" hidden aria-labelledby="sorter-title">
@@ -127,7 +130,7 @@
       <h2 id="tier-title">Tier Board</h2>
       <div class="tier-actions">
         <button id="btn-export-png" class="btn">Export PNG</button>
-        <label class="checkbox"><input type="checkbox" id="png-transparent" /> Transparent background</label>
+        <label class="checkbox"><input type="checkbox" id="png-transparent" checked /> Transparent background</label>
         <button id="btn-export-json" class="btn">Export JSON</button>
         <label class="file-input btn">Import JSON<input id="input-import-json" type="file" accept="application/json" hidden /></label>
         <button id="btn-share" class="btn">Copy Share Link</button>
