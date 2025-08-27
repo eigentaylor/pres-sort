@@ -549,7 +549,10 @@ function makePrefer() {
   const btnRight = $('#choose-right');
   const btnSkip = $('#choose-skip');
   const btnBack = $('#choose-back');
-  if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+  
+  // Update back button with current state
+  updateBackButton();
+  
   if (btnLeft) btnLeft.onclick = (e) => { e && e.preventDefault(); console.debug('choose-left clicked'); finish(1); };
   if (btnTie) btnTie.onclick = (e) => { e && e.preventDefault(); console.debug('choose-tie clicked'); finish(0); };
   if (btnRight) btnRight.onclick = (e) => { e && e.preventDefault(); console.debug('choose-right clicked'); finish(-1); };
@@ -601,6 +604,7 @@ function objsOf(ids, idMap) { return ids.map(id => idMap.get(id)).filter(Boolean
 function initSort(items) {
   if (!Array.isArray(items) || items.length === 0) throw new Error('No items to sort');
   // We'll use binary insertion: build an ordered array progressively by inserting each candidate
+  state.sorter.mode = 'insertion';
   state.sorter.active = true;
   state.sorter.result = null;
   // stack holds: mode:'insertion', result: [ids inserted so far], pending: [ids left to insert], i: current index
@@ -617,8 +621,9 @@ function initSort(items) {
   // Use binary-insertion theoretical upper bound for comparisons as totalComparisons estimate
   state.sorter.totalComparisons = totalComparisonUpperBound(n);
   state.sorter.undo = [];
-  pushUndoSnapshot();
+  // Don't take initial snapshot here - wait until first real choice
   saveState();
+  dbg('initSort', { n, totalComparisons: state.sorter.totalComparisons, seed: state.seed });
 }
 
 // --- ELO mode --------------------------------------------------------------
@@ -654,8 +659,9 @@ function initElo(items) {
   state.sorter.elo = elo;
   // expose for progress display
   state.sorter.totalComparisons = elo.totalPairs;
-  pushUndoSnapshot();
+  // Don't take initial snapshot here - wait until first real choice
   saveState();
+  dbg('initElo', { n: ids.length, totalPairs: elo.totalPairs, kFactor, intensity, queueSeed: elo.queue.length });
 }
 
 function estimateEloPairTarget(n) {
@@ -670,8 +676,8 @@ function eloExpected(ra, rb) { return 1 / (1 + Math.pow(10, (rb - ra) / 400)); }
 function eloUpdate(r, score, expected, k) { return r + k * (score - expected); }
 
 async function continueElo() {
-  const idMap = new Map(state.data.map(p => [p.id, p]));
-  const elo = state.sorter.elo;
+  let idMap = new Map(state.data.map(p => [p.id, p]));
+  let elo = state.sorter.elo;
   const nextPair = () => {
     // Pull from queue; if empty, pick two with closest ratings to refine borders
     if (elo.queue.length > 0) return elo.queue.shift();
@@ -699,13 +705,27 @@ async function continueElo() {
     const a = idMap.get(pairIds[0]);
     const b = idMap.get(pairIds[1]);
     if (!a || !b || a.id === b.id) continue;
-    // show and ask
+    dbg('elo:pair', { a: a.id, b: b.id, pairsDone: elo.pairsDone, total });
+    
+    // Take snapshot BEFORE asking the question (this is the state we can restore to)
     pushUndoSnapshot();
+    
+    // show and ask
     const res = await prefer(a, b);
-    if (res === 'BACK') { restoreFromUndo(); continue; }
+    if (res === 'BACK') { 
+      const ok = restoreFromUndo(); 
+      if (!ok) return; // nothing to undo
+      // rebind local references from restored state before resuming
+      elo = state.sorter.elo;
+      idMap = new Map(state.data.map(p => [p.id, p]));
+      dbg('elo:after-back', sorterDigest(state.sorter));
+      continue;
+    }
+    
     if (res === null) {
       // Treat skip as a draw; requeue later to revisit
       elo.queue.push([a.id, b.id]);
+      dbg('elo:skip', { a: a.id, b: b.id, queueLen: elo.queue.length });
       saveState();
       continue;
     }
@@ -719,6 +739,7 @@ async function continueElo() {
     const Sb = isTie ? 0.5 : (res < 0 ? 1 : 0);
     elo.ratings[a.id] = eloUpdate(ra, Sa, Ea, k);
     elo.ratings[b.id] = eloUpdate(rb, Sb, Eb, k);
+  dbg('elo:update', { a: a.id, b: b.id, res, ra: Math.round(ra), rb: Math.round(rb), newA: Math.round(elo.ratings[a.id]), newB: Math.round(elo.ratings[b.id]) });
   // record history (cap to 10)
   (elo.history[a.id] ||= []).push(Math.round(elo.ratings[a.id])); if (elo.history[a.id].length > 10) elo.history[a.id].shift();
   (elo.history[b.id] ||= []).push(Math.round(elo.ratings[b.id])); if (elo.history[b.id].length > 10) elo.history[b.id].shift();
@@ -733,6 +754,7 @@ async function continueElo() {
     }
     saveState();
     progressFromElo();
+  dbg('elo:progress', { pairsDone: elo.pairsDone, total, queueLen: elo.queue.length });
     try { renderLiveRanking([a.id, b.id]); } catch {}
   }
 
@@ -742,31 +764,60 @@ async function continueElo() {
   state.sorter.active = false;
   state.sorter.result = result;
   state.sorter.mode = 'elo';
-  const btnBackEnd = document.getElementById('choose-back'); if (btnBackEnd) btnBackEnd.disabled = true;
+  updateBackButton(); // Disable back button when finished
   updateProgress(100);
   saveState();
   renderResults(result);
   showScreen('screen-results');
 }
 
+function updateBackButton() {
+  const btnBack = document.getElementById('choose-back');
+  if (!btnBack) return;
+  
+  const availableSteps = Math.max(0, (state.sorter.undo?.length || 0) - 1);
+  btnBack.disabled = availableSteps === 0;
+  btnBack.textContent = availableSteps > 0 ? `Back (${availableSteps})` : 'Back';
+  dbg('updateBackButton', { availableSteps });
+}
+
+// Robust deep clone helper with structuredClone fallback
+function __deepClone(obj) {
+  try {
+    // structuredClone is widely available in modern browsers
+    return structuredClone(obj);
+  } catch (_) {
+    try { return JSON.parse(JSON.stringify(obj)); }
+    catch (e) { console.warn('deepClone failed', e); return null; }
+  }
+}
+
+function __getSorterSnapshot() {
+  // Clone the entire sorter state but drop the undo stack to avoid recursion
+  const cloned = __deepClone(state.sorter);
+  if (!cloned) return null;
+  delete cloned.undo;
+  return cloned;
+}
+
 function pushUndoSnapshot() {
   try {
-    const snap = {
-      // core sorter fields
-      mode: state.sorter.mode,
-      active: !!state.sorter.active,
-      totalComparisons: state.sorter.totalComparisons ?? 0,
-      // merge-sort state
-      stack: JSON.parse(JSON.stringify(state.sorter.stack)),
-      cache: JSON.parse(JSON.stringify(state.sorter.cache)),
-      ties: JSON.parse(JSON.stringify(state.sorter.ties)),
-      // elo state
-      elo: JSON.parse(JSON.stringify(state.sorter.elo || null)),
-    };
+  dbg('pushUndoSnapshot:before', sorterDigest(state.sorter));
+    if (!state.sorter) return;
+    if (!Array.isArray(state.sorter.undo)) state.sorter.undo = [];
+    const snap = __getSorterSnapshot();
+    if (!snap) return;
+    // de-dup identical consecutive snapshots
+    const prev = state.sorter.undo[state.sorter.undo.length - 1];
+    if (prev && JSON.stringify(prev) === JSON.stringify(snap)) {
+      dbg('pushUndoSnapshot:skipped-duplicate', { undoLen: state.sorter.undo.length });
+      return;
+    }
     state.sorter.undo.push(snap);
     // cap memory
     const MAX_UNDO = 2000; // allow long backtracks
     if (state.sorter.undo.length > MAX_UNDO) state.sorter.undo.splice(0, state.sorter.undo.length - MAX_UNDO);
+  dbg('pushUndoSnapshot:after', { undoLen: state.sorter.undo.length });
   } catch (e) { console.warn('pushUndoSnapshot failed', e); }
 }
 
@@ -774,18 +825,21 @@ function restoreFromUndo() {
   const stack = state.sorter.undo || [];
   if (stack.length < 2) { toast('Nothing to undo'); return false; }
   // discard current snapshot and use previous
+  dbg('restoreFromUndo:before-pop', { undoLen: stack.length, digest: sorterDigest(state.sorter) });
   stack.pop();
   const prev = stack[stack.length - 1];
   if (!prev) return false;
-  state.sorter.mode = prev.mode || state.sorter.mode;
-  state.sorter.active = !!prev.active;
-  state.sorter.totalComparisons = prev.totalComparisons ?? state.sorter.totalComparisons;
-  state.sorter.stack = prev.stack;
-  state.sorter.cache = prev.cache;
-  state.sorter.ties = prev.ties;
-  state.sorter.elo = prev.elo || null;
+  // Restore the sorter wholesale from the snapshot, re-attaching the existing undo stack
+  const restored = __deepClone(prev) || prev;
+  restored.undo = stack;
+  state.sorter = restored;
   saveState();
-  toast('Undid last choice', { ok: true });
+  const stepsRemaining = stack.length - 1; // -1 because we need at least 1 to go back to
+  toast(`Undid last choice (${stepsRemaining} steps remaining)`, { ok: true });
+  
+  // Update back button
+  updateBackButton();
+  
   // Refresh UI bits (progress and live ranking) to reflect restored state
   try {
     if (state.sorter.mode === 'elo' && state.sorter.elo) {
@@ -794,7 +848,6 @@ function restoreFromUndo() {
       const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
       updateProgress(pct);
     } else if (state.sorter.stack) {
-      // For insertion mode, we already set a totalComparisons upper bound when initializing the stack.
       const donePairs = countUniqueCachePairs(state.sorter.cache || {});
       const total = state.sorter.totalComparisons || 0;
       const pct = total > 0 ? Math.min(100, (donePairs / total) * 100) : 0;
@@ -804,6 +857,7 @@ function restoreFromUndo() {
     }
   } catch {}
   try { renderLiveRanking(); } catch {}
+  dbg('restoreFromUndo:after', sorterDigest(state.sorter));
   return true;
 }
 
@@ -835,15 +889,16 @@ async function continueSort() {
   while (st && ((st.pending && st.pending.length > 0) || st.current)) {
     // Start a new candidate if none active
     if (!st.current) {
-      pushUndoSnapshot();
       const nextId = st.pending.shift();
       if (!nextId) break;
       st.current = nextId;
+  dbg('ins:start-candidate', { current: st.current, resultLen: st.result.length, pendingLen: st.pending.length });
       // capture the provisional ordering (result followed by the current candidate and remaining pending)
       try {
         st.provisionalOrder = (Array.isArray(st.result) ? st.result.slice() : []).concat([st.current]).concat(Array.isArray(st.pending) ? st.pending.slice() : []);
       } catch (e) { st.provisionalOrder = null; }
       st.lo = 0; st.hi = st.result.length;
+      
       // fast path: empty result
       if (st.hi === 0) {
         st.result.push(st.current);
@@ -884,10 +939,15 @@ async function continueSort() {
       if (!a || !b) {
         // adjust bounds safely if either side missing
         if (!b) { st.hi = mid; } else { st.lo = mid + 1; }
+        dbg('ins:missing-probe', { current: safeId(a), probeId: safeId(b), lo: st.lo, hi: st.hi });
         continue;
       }
+      
+      // Take snapshot BEFORE asking the question (this is the state we can restore to)
       pushUndoSnapshot();
+      
       try { renderLiveRanking([st.current, probeId]); } catch {}
+      dbg('ins:ask', { current: st.current, probe: probeId, lo: st.lo, hi: st.hi });
       const res = await prefer(a, b);
       if (res === 'BACK') {
         const ok = restoreFromUndo();
@@ -896,20 +956,24 @@ async function continueSort() {
         st = state.sorter.stack;
         idMap = new Map(state.data.map(p => [p.id, p]));
         try { renderLiveRanking(); } catch {}
-        // go to top of loop to pick up restored state cleanly
+        dbg('ins:after-back', sorterDigest(state.sorter));
         continue;
       }
+      
       if (res === null) {
         // Treat as tie: insert at mid
         st.lo = mid;
         // fall through to insertion after loop condition
         st.hi = st.lo; // force exit
+        dbg('ins:tie', { at: mid });
       } else if (res > 0) {
         // a > b => before b
         st.hi = mid;
+        dbg('ins:choice', { result: 'a>b', mid, lo: st.lo, hi: st.hi });
       } else {
         // a < b => after b
         st.lo = mid + 1;
+        dbg('ins:choice', { result: 'a<b', mid, lo: st.lo, hi: st.hi });
       }
       saveState();
       estimate();
@@ -928,9 +992,10 @@ async function continueSort() {
   // clear provisional snapshot now that insertion completed
   st.provisionalOrder = null;
       saveState();
-  try { renderLiveRanking(); } catch {}
+      try { renderLiveRanking(); } catch {}
   // update back button enabled state after a concrete step
-  const btnBackNow = document.getElementById('choose-back'); if (btnBackNow) btnBackNow.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+  updateBackButton();
+  dbg('ins:inserted', { pos, resultLen: st.result.length, pendingLen: st.pending.length });
     }
   }
 
@@ -939,11 +1004,12 @@ async function continueSort() {
   state.sorter.active = false;
   state.sorter.result = result;
   state.sorter.stack = null;
-  const btnBackEnd = document.getElementById('choose-back'); if (btnBackEnd) btnBackEnd.disabled = true;
+  updateBackButton(); // Disable back button when finished
   updateProgress(100);
   saveState();
   renderResults(result);
   showScreen('screen-results');
+  dbg('ins:finished', { resultLen: result.length });
 }
 
 function estimateProgress(n, uniquePairCount) {
@@ -1269,6 +1335,51 @@ function tryLoadShareFromHash() {
 }
 
 // --- App lifecycle ----------------------------------------------------------
+// --- Debug logging helpers -------------------------------------------------
+let __DBG = { seq: 0 };
+function dbg(tag, info) {
+  try {
+    const n = ++__DBG.seq;
+    // eslint-disable-next-line no-console
+    console.debug(`pps[${n}] ${tag}`, info);
+  } catch (_) {}
+}
+
+function safeId(x) {
+  if (!x) return null;
+  if (typeof x === 'string') return x;
+  if (typeof x === 'object' && x.id != null) return x.id;
+  return String(x);
+}
+
+function sorterDigest(s) {
+  try {
+    if (!s) return { none: true };
+    const mode = s.mode || (s.stack?.mode) || 'unknown';
+    const undoLen = (s.undo && s.undo.length) || 0;
+    const cachePairs = countUniqueCachePairs(s.cache || {});
+    const tiePairs = s.ties ? Object.keys(s.ties).length : 0;
+    const base = { mode, active: !!s.active, undoLen, cachePairs, tiePairs, totalComparisons: s.totalComparisons || 0 };
+    if (s.stack && s.stack.mode === 'insertion') {
+      const st = s.stack;
+      base.insertion = {
+        resultLen: (st.result || []).length,
+        pendingLen: (st.pending || []).length,
+        lo: st.lo|0, hi: st.hi|0,
+        current: safeId(st.current), probe: safeId(st.probe),
+      };
+    }
+    if (s.elo) {
+      base.elo = {
+        pairsDone: s.elo.pairsDone|0,
+        totalPairs: s.elo.totalPairs|0,
+        queueLen: (s.elo.queue || []).length,
+      };
+    }
+    return base;
+  } catch (e) { return { error: 'digest-failed', e: String(e) }; }
+}
+
 let state = loadState() || defaultState();
 
 console.log('pps: app.js loaded');
@@ -1358,8 +1469,7 @@ function applyStateOnLoad(loadedData) {
       return;
     }
     if (!state.sorter.stack) { initSort(seededShuffle(state.data, state.seed)); }
-  const btnBack = document.getElementById('choose-back');
-  if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+  updateBackButton();
     await continueSort();
   };
   $('#btn-skip-to-tiers').onclick = () => {
@@ -1492,8 +1602,7 @@ async function startSorting() {
   initSort(items);
     showScreen('screen-sorter');
   updateProgress(estimateProgress(items.length, countUniqueCachePairs(state.sorter.cache)));
-  const btnBack = document.getElementById('choose-back');
-  if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+  updateBackButton();
     await continueSort();
   } catch (err) {
     console.error('startSorting error', err);
@@ -1527,10 +1636,10 @@ async function startSortingElo() {
     initElo(items);
     showScreen('screen-sorter');
     updateProgress(0);
-    const btnBack = document.getElementById('choose-back');
-    if (btnBack) btnBack.disabled = !(state.sorter.undo && state.sorter.undo.length >= 2);
+    updateBackButton();
     await continueElo();
   } catch (err) {
+
     console.error('startSortingElo error', err);
     toast('An error occurred starting ELO mode', { error: true });
     throw err;
