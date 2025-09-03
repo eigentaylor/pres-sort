@@ -210,7 +210,7 @@ const defaultState = () => ({
     eloIntensity: 'balanced', // 'fast' | 'balanced' | 'accurate'
   },
   // tier board
-  tiers: { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] },
+  tiers: { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] },
   // for share link and exports
   history: [],
 });
@@ -260,7 +260,7 @@ function sanitizeState(s) {
 
     // ensure tiers structure
     s.tiers = s.tiers || {};
-    ['SS','S','A','B','C','D','F','Unplaced'].forEach(t => { if (!Array.isArray(s.tiers[t])) s.tiers[t] = []; });
+    ['SS','S','A','B','C','D','E','F','Unplaced'].forEach(t => { if (!Array.isArray(s.tiers[t])) s.tiers[t] = []; });
 
     // sorter defaults
     s.sorter = s.sorter || {};
@@ -1058,7 +1058,7 @@ function restartKeepData() {
   const savedData = Array.isArray(state.data) ? state.data : [];
   state = defaultState();
   state.data = savedData;
-  state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+  state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] };
   saveState();
   showScreen('screen-welcome');
 }
@@ -1117,7 +1117,7 @@ function buildTierBoard() {
 }
 
 // --- Tier Cutoffs Wizard ---------------------------------------------------
-const CUTOFF_TIERS = ['SS','S','A','B','C','D','F'];
+const CUTOFF_TIERS = ['SS','S','A','B','C','D','E','F'];
 let cutState = null; // { rankIds: string[], pos: 0.., chosen: {SS:number,...}, cursor: 0 }
 
 function startCutoffs() {
@@ -1185,7 +1185,7 @@ function applyCutoffsToTiers() {
   // Build tiers from chosen counts; leftover go to Unplaced initially
   const idMap = new Map(state.data.map(p => [p.id, p]));
   const ids = cutState.rankIds.slice();
-  const tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+  const tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] };
   let cursor = 0;
   CUTOFF_TIERS.forEach(t => {
     const n = Math.max(0, Math.min(ids.length - cursor, cutState.chosen[t] || 0));
@@ -1299,7 +1299,7 @@ async function importJSON(file) {
     const ids = new Set(state.data.map(p => p.id));
     Object.values(data.tiers).flat().forEach(id => { if (!ids.has(id)) throw new Error('Unknown id in file'); });
 
-    state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [], ...data.tiers };
+    state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [], ...data.tiers };
     if (Array.isArray(data.ranking)) {
       const idMap = new Map(state.data.map(p => [p.id, p]));
       state.sorter.result = data.ranking.map(id => idMap.get(id)).filter(Boolean);
@@ -1405,7 +1405,7 @@ function applyStateOnLoad(loadedData) {
     if (shared.choices) state.sorter.cache = shared.choices;
     if (shared.ties) state.sorter.ties = shared.ties;
     if (shared.ranking) state.sorter.result = shared.ranking.map(id => idMap.get(id)).filter(Boolean);
-    if (shared.tiers) state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [], ...shared.tiers };
+    if (shared.tiers) state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [], ...shared.tiers };
     state.seed = shared.seed || state.seed;
     saveState();
   }
@@ -1453,7 +1453,7 @@ function applyStateOnLoad(loadedData) {
       const aggressive = confirm('Repair state: OK = aggressive (wipe sorter progress), Cancel = soft repair (sanitize only).\n\nAggressive will keep candidate data but remove sorter progress, cache, ties, and undo history.');
       if (aggressive) {
         repaired.sorter = { active: false, pendingResolve: null, cache: {}, ties: {}, progress: 0, stack: null, result: null, undo: [] };
-        repaired.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+        repaired.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] };
       }
       localStorage.setItem(LS_KEY, JSON.stringify(repaired));
       toast(`Repaired state (data before: ${beforeCount}, after: ${repaired.data.length})`, { ok: true });
@@ -1524,7 +1524,7 @@ async function startSorting() {
   // Fresh run: clear persisted state and reset in-memory state to defaults
   clearState();
   state = defaultState();
-  state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+  state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] };
   // Load fresh data to avoid relying on possibly mutated state.data
   let fresh;
   try { fresh = await loadData(); } catch (e) { fresh = Array.isArray(state.data) ? state.data : []; }
@@ -1625,7 +1625,7 @@ async function startSortingElo() {
   try {
     clearState();
     state = defaultState();
-    state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], F: [], Unplaced: [] };
+    state.tiers = { SS: [], S: [], A: [], B: [], C: [], D: [], E: [], F: [], Unplaced: [] };
     let fresh;
     try { fresh = await loadData(); } catch (e) { fresh = Array.isArray(state.data) ? state.data : []; }
     const source = Array.from(fresh || []).filter(p => p && p.id);
