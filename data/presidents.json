@@ -42,6 +42,6 @@
     {"id":"clinton","number":42,"name":"Bill Clinton","years":"1993–2001"},
     {"id":"george_w_bush","number":43,"name":"George W. Bush","years":"2001–2009"},
     {"id":"obama","number":44,"name":"Barack Obama","years":"2009–2017"},
-    {"id":"trump","number":45,"name":"Donald Trump","years":"2017–2021, 2025"},
-    {"id":"biden","number":46,"name":"Joe Biden","years":"2021–present"}
+    {"id":"trump","number":45,"name":"Donald Trump","years":"2017–2021, 2025-present"},
+    {"id":"biden","number":46,"name":"Joe Biden","years":"2021–2025"}
 ]
