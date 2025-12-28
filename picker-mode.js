@@ -7,7 +7,7 @@
 */
 
 const PICKER_CONFIG = {
-    MAX_BATCH_SIZE: 8,      // Maximum items shown at once (2x4 grid)
+    MAX_BATCH_SIZE: 6,      // Maximum items shown at once (2x4 grid)
     MIN_BATCH_SIZE: 2,      // Minimum batch size
     WHITTLE_DIVISOR: 4,     // batch = ceil(remaining / this), clamped to min/max
 };
@@ -505,7 +505,7 @@ class PickerUI {
 
     copyFavoritesList() {
         const favorites = this.picker.getFavorites();
-        
+
         if (favorites.length === 0) {
             alert('No favorites yet!');
             return;
@@ -905,7 +905,7 @@ class PickerUI {
             empty.className = 'picker-fav-empty';
             empty.textContent = 'Your favorites will appear here';
             this.elem.favorites.appendChild(empty);
-            
+
             // Disable buttons when no favorites
             if (this.elem.done) {
                 this.elem.done.disabled = true;
