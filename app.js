@@ -1427,6 +1427,33 @@ function applyStateOnLoad(loadedData) {
     historianCheckbox.checked = state.useHistorian !== false;
     historianCheckbox.onchange = () => { state.useHistorian = historianCheckbox.checked; saveState(); };
   }
+  
+  // --- Picker Mode Integration ---
+  const btnStartPicker = $('#btn-start-picker');
+  if (btnStartPicker) {
+    btnStartPicker.disabled = false;
+    btnStartPicker.addEventListener('click', async () => {
+      console.log('pps: Start Picker button clicked');
+      try { await startPickerMode(); }
+      catch (err) { console.error(err); toast('Start picker failed', { error: true }); }
+    });
+  }
+  
+  const btnResumePicker = $('#btn-resume-picker');
+  if (btnResumePicker) {
+    btnResumePicker.addEventListener('click', async () => {
+      console.log('pps: Resume Picker button clicked');
+      try { await resumePickerMode(); }
+      catch (err) { console.error(err); toast('Resume picker failed', { error: true }); }
+    });
+  }
+  
+  // Check if there's saved picker progress
+  const hasPickerProgress = localStorage.getItem('pps.v1.picker');
+  if (hasPickerProgress && btnResumePicker) {
+    btnResumePicker.hidden = false;
+  }
+  
   const btnStartElo = $('#btn-start-elo');
   if (btnStartElo) {
     btnStartElo.disabled = false;
@@ -1642,6 +1669,94 @@ async function startSortingElo() {
 
     console.error('startSortingElo error', err);
     toast('An error occurred starting ELO mode', { error: true });
+    throw err;
+  }
+}
+
+// --- Picker Mode Functions -------------------------------------------------
+async function startPickerMode() {
+  try {
+    // Clear picker state and start fresh
+    if (typeof resetPickerState === 'function') resetPickerState();
+    
+    // Show screen first
+    showScreen('screen-picker');
+    
+    // Load fresh data
+    let fresh;
+    try { fresh = await loadData(); } catch (e) { fresh = Array.isArray(state.data) ? state.data : []; }
+    const source = Array.from(fresh || []).filter(p => p && p.id);
+    state.data = source;
+    
+    if (source.length === 0) throw new Error('No valid candidates available');
+    
+    // Initialize picker mode (async to preload images)
+    if (typeof initPickerMode === 'function') {
+      await initPickerMode(source);
+    } else {
+      throw new Error('Picker mode not available');
+    }
+    
+    // Set up callbacks
+    window.pickerFinishCallback = (favorites) => {
+      console.log('pps: Picker finished with', favorites.length, 'favorites');
+      // Use picker favorites as the sorted result
+      state.sorter.result = favorites;
+      saveState();
+      renderResults(favorites);
+      showScreen('screen-results');
+    };
+    
+    window.pickerCancelCallback = () => {
+      console.log('pps: Picker cancelled');
+      showScreen('screen-welcome');
+    };
+  } catch (err) {
+    console.error('startPickerMode error', err);
+    toast('An error occurred starting picker mode', { error: true });
+    throw err;
+  }
+}
+
+async function resumePickerMode() {
+  try {
+    // Show screen first
+    showScreen('screen-picker');
+    
+    // Load data if needed
+    let source = state.data;
+    if (!source || source.length === 0) {
+      let fresh;
+      try { fresh = await loadData(); } catch (e) { fresh = []; }
+      source = Array.from(fresh || []).filter(p => p && p.id);
+      state.data = source;
+    }
+    
+    if (source.length === 0) throw new Error('No valid candidates available');
+    
+    // Initialize picker mode (will load saved state, async for preloading)
+    if (typeof initPickerMode === 'function') {
+      await initPickerMode(source);
+    } else {
+      throw new Error('Picker mode not available');
+    }
+    
+    // Set up callbacks
+    window.pickerFinishCallback = (favorites) => {
+      console.log('pps: Picker finished with', favorites.length, 'favorites');
+      state.sorter.result = favorites;
+      saveState();
+      renderResults(favorites);
+      showScreen('screen-results');
+    };
+    
+    window.pickerCancelCallback = () => {
+      console.log('pps: Picker cancelled');
+      showScreen('screen-welcome');
+    };
+  } catch (err) {
+    console.error('resumePickerMode error', err);
+    toast('An error occurred resuming picker mode', { error: true });
     throw err;
   }
 }
