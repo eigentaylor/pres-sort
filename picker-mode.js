@@ -7,9 +7,9 @@
 */
 
 const PICKER_CONFIG = {
-    MAX_BATCH_SIZE: 6,      // Maximum items shown at once (2x4 grid)
+    MAX_BATCH_SIZE: 6,      // Maximum items shown at once (2x3 grid)
     MIN_BATCH_SIZE: 2,      // Minimum batch size
-    WHITTLE_DIVISOR: 4,     // batch = ceil(remaining / this), clamped to min/max
+    WHITTLE_DIVISOR: 2,     // batch = ceil(remaining / this), clamped to min/max
 };
 
 const PICKER_LS_KEY = 'pps.v1.picker';
@@ -34,6 +34,9 @@ class PresidentialPicker {
         // Batch size
         this.batchSize = PICKER_CONFIG.MAX_BATCH_SIZE;
 
+        // Pick counter (excludes passes)
+        this.pickCount = 0;
+
         // Build id->item map
         this.itemMap = new Map(items.map(p => [p.id, p]));
     }
@@ -50,6 +53,7 @@ class PresidentialPicker {
         this.favorites = [];
         this.history = [];
         this.historyIndex = -1;
+        this.pickCount = 0;
 
         this.batchSize = this.calculateBatchSize(this.current.length);
         this.nextBatch();
@@ -78,6 +82,16 @@ class PresidentialPicker {
     // This matches the original picker.js logic
     nextBatch() {
         console.log('[nextBatch] START - current:', this.current.length, 'survived:', this.survived.length, 'eliminated:', this.eliminated.length, 'favorites:', this.favorites.length);
+
+        // Safety check: if we're stuck (nothing in current/survived but have eliminated items),
+        // restore all eliminated items to continue
+        if (this.current.length === 0 && this.survived.length === 0 && this.eliminated.length > 0) {
+            console.log('[nextBatch] Stuck with no items but', this.eliminated.length, 'eliminated. Restoring all.');
+            for (const entry of this.eliminated) {
+                this.survived.push(entry.id);
+            }
+            this.eliminated = [];
+        }
 
         // If current doesn't have enough items but survived does, start new round
         // The original checks: current.length < batchSize && survived.length > 0
@@ -172,9 +186,24 @@ class PresidentialPicker {
     pick(pickedIds) {
         console.log('[pick] Picked', pickedIds.length, 'of', this.evaluating.length);
         this.pushHistory();
+        this.pickCount++;
 
         const pickedSet = new Set(pickedIds);
         const notPicked = this.evaluating.filter(id => !pickedSet.has(id));
+
+        // Special case: if this is the FINAL choice (only 2 items remain total),
+        // add both to favorites immediately (picked one first, then unpicked)
+        const totalRemaining = this.current.length + this.survived.length + this.evaluating.length + this.eliminated.length;
+        if (totalRemaining === 2 && this.evaluating.length === 2 && pickedIds.length === 1) {
+            console.log('[pick] Final choice - adding both items to favorites');
+            // Add picked one first (higher rank)
+            this.favorites.push(pickedIds[0]);
+            // Add unpicked one last (lower rank)
+            this.favorites.push(notPicked[0]);
+            this.evaluating = [];
+            this.saveState();
+            return;
+        }
 
         // Picked items survive
         this.survived.push(...pickedIds);
@@ -228,7 +257,8 @@ class PresidentialPicker {
             current: this.current,
             evaluating: this.evaluating,
             favorites: this.favorites,
-            batchSize: this.batchSize
+            batchSize: this.batchSize,
+            pickCount: this.pickCount
         });
     }
 
@@ -240,6 +270,7 @@ class PresidentialPicker {
         this.evaluating = s.evaluating;
         this.favorites = s.favorites;
         this.batchSize = s.batchSize;
+        this.pickCount = s.pickCount || 0;
     }
 
     canUndo() {
@@ -281,6 +312,7 @@ class PresidentialPicker {
             evaluating: this.evaluating,
             favorites: this.favorites,
             batchSize: this.batchSize,
+            pickCount: this.pickCount,
             historyIndex: this.historyIndex,
             history: this.history
         };
@@ -299,6 +331,7 @@ class PresidentialPicker {
             this.evaluating = s.evaluating || [];
             this.favorites = s.favorites || [];
             this.batchSize = s.batchSize || PICKER_CONFIG.MAX_BATCH_SIZE;
+            this.pickCount = s.pickCount || 0;
             this.history = s.history || [];
             this.historyIndex = s.historyIndex ?? -1;
 
@@ -503,6 +536,17 @@ class PickerUI {
         }
     }
 
+    getPresidentialNumber(person) {
+        // Special handling for presidents with non-consecutive terms
+        if (person.id === 'cleveland') {
+            return '#22 & 24';
+        }
+        if (person.id === 'trump') {
+            return '#45 & 47';
+        }
+        return person.number != null ? `#${person.number}` : '';
+    }
+
     copyFavoritesList() {
         const favorites = this.picker.getFavorites();
 
@@ -511,9 +555,10 @@ class PickerUI {
             return;
         }
 
-        // Format as numbered list
+        // Format as numbered list with presidential numbers
         const listText = favorites.map((person, index) => {
-            return `${index + 1}. ${person.name}`;
+            const presNum = this.getPresidentialNumber(person);
+            return `${index + 1}. ${person.name} ${presNum}`;
         }).join('\n');
 
         // Copy to clipboard
@@ -834,7 +879,7 @@ class PickerUI {
         if (person.number != null) {
             const badge = document.createElement('span');
             badge.className = 'picker-number';
-            badge.textContent = `#${person.number}`;
+            badge.textContent = this.getPresidentialNumber(person);
             el.appendChild(badge);
         }
 
@@ -962,9 +1007,15 @@ class PickerUI {
         name.className = 'picker-fav-name';
         name.textContent = person.name;
 
+        // Number badge for favorites
+        const numberBadge = document.createElement('span');
+        numberBadge.className = 'picker-fav-number';
+        numberBadge.textContent = this.getPresidentialNumber(person);
+
         el.appendChild(rankEl);
         el.appendChild(imgWrap);
         el.appendChild(name);
+        el.appendChild(numberBadge);
 
         return el;
     }
@@ -1005,6 +1056,7 @@ class PickerUI {
             const batch = this.picker.evaluating.length;
             const inRound = this.picker.current.length + this.picker.survived.length + batch;
             const eliminated = this.picker.eliminated.length;
+            const picks = this.picker.pickCount;
 
             if (batch > 0) {
                 let statusText = `Pick your favorites from these ${batch}.`;
@@ -1014,10 +1066,11 @@ class PickerUI {
                 if (eliminated > 0) {
                     statusText += ` • ${eliminated} eliminated (may return later)`;
                 }
+                statusText += ` • ${picks} ${picks === 1 ? 'pick' : 'picks'} made`;
                 statusText += ' • Double-click to pick just one.';
                 this.elem.status.textContent = statusText;
             } else if (this.picker.isComplete()) {
-                this.elem.status.textContent = 'Sorting complete! Drag to reorder your favorites.';
+                this.elem.status.textContent = `Sorting complete! You made ${picks} ${picks === 1 ? 'choice' : 'choices'}. Drag to reorder your favorites.`;
             }
         }
     }
