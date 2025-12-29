@@ -83,6 +83,11 @@ class PresidentialPicker {
     nextBatch() {
         console.log('[nextBatch] START - current:', this.current.length, 'survived:', this.survived.length, 'eliminated:', this.eliminated.length, 'favorites:', this.favorites.length);
 
+        // Integrity check: recover any missing items first
+        if (this.recoverMissingItems()) {
+            console.log('[nextBatch] Recovered missing items to survived');
+        }
+
         // Safety check: if we're stuck (nothing in current/survived but have eliminated items),
         // restore all eliminated items to continue
         if (this.current.length === 0 && this.survived.length === 0 && this.eliminated.length > 0) {
@@ -338,7 +343,19 @@ class PresidentialPicker {
             // Validate: if evaluating is invalid (< 2 items), regenerate it
             if (this.evaluating.length < 2 && !this.isComplete()) {
                 console.warn('Loaded invalid state (batch < 2), regenerating batch...');
+                // First check for missing items
+                this.recoverMissingItems();
                 this.nextBatch();
+            }
+
+            // Final integrity check
+            const missing = this.getMissingItems();
+            if (missing.length > 0) {
+                console.warn('Loaded state has missing items, recovering:', missing);
+                this.recoverMissingItems();
+                if (!this.isComplete()) {
+                    this.nextBatch();
+                }
             }
 
             return true;
@@ -372,15 +389,35 @@ class PresidentialPicker {
     }
 
     isComplete() {
-        // Complete when all items have been ranked as favorites
-        // OR when there are no more items to evaluate and we've found at least one favorite
-        const allRanked = this.favorites.length === this.allItems.length;
-        const nothingLeft = this.evaluating.length === 0 &&
-            this.current.length === 0 &&
-            this.survived.length === 0 &&
-            this.eliminated.length === 0;
+        // Complete ONLY when ALL items have been ranked as favorites
+        // This is the strict check to ensure no items are lost
+        return this.favorites.length === this.allItems.length;
+    }
 
-        return allRanked || (nothingLeft && this.favorites.length > 0);
+    // Check for any items that aren't accounted for in any array
+    getMissingItems() {
+        const accounted = new Set([
+            ...this.favorites,
+            ...this.evaluating,
+            ...this.current,
+            ...this.survived,
+            ...this.eliminated.map(e => e.id)
+        ]);
+        
+        return this.allItems
+            .filter(item => !accounted.has(item.id))
+            .map(item => item.id);
+    }
+
+    // Restore any missing items to survived
+    recoverMissingItems() {
+        const missing = this.getMissingItems();
+        if (missing.length > 0) {
+            console.warn('[recoverMissingItems] Found', missing.length, 'missing items:', missing);
+            this.survived.push(...missing);
+            return true;
+        }
+        return false;
     }
 
     hasItems() {
@@ -808,11 +845,20 @@ class PickerUI {
 
         if (batch.length === 0) {
             if (this.picker.isComplete()) {
+                const total = this.picker.allItems.length;
+                const found = this.picker.favorites.length;
                 const notice = document.createElement('div');
                 notice.className = 'picker-notice';
-                notice.innerHTML = this.picker.hasItems()
-                    ? `<p>${this.messages.orderedAll}</p><button class="btn" id="picker-reset-inline">Start Over</button>`
-                    : `<p>${this.messages.noItems}</p>`;
+                
+                if (found === total) {
+                    notice.innerHTML = this.picker.hasItems()
+                        ? `<p>${this.messages.orderedAll}</p><p class="muted">All ${total} presidents ranked!</p><button class="btn" id="picker-reset-inline">Start Over</button>`
+                        : `<p>${this.messages.noItems}</p>`;
+                } else {
+                    // This shouldn't happen with strict isComplete(), but guard anyway
+                    console.error('Completion triggered but only', found, 'of', total, 'ranked!');
+                    notice.innerHTML = `<p>Something went wrong - only ${found} of ${total} ranked.</p><button class="btn" id="picker-reset-inline">Start Over</button>`;
+                }
                 this.elem.evaluating.appendChild(notice);
 
                 const resetBtn = notice.querySelector('#picker-reset-inline');
@@ -822,17 +868,25 @@ class PickerUI {
 
                 this.elem.pick.disabled = true;
                 this.elem.pass.disabled = true;
+            } else {
+                // Not complete but no batch - try to regenerate
+                console.warn('[updateEvaluating] No batch but not complete. Recovering...');
+                this.picker.recoverMissingItems();
+                this.picker.nextBatch();
+                // Re-call update after recovery
+                setTimeout(() => this.update(), 50);
             }
             return;
         }
 
         // Edge case: if somehow only 1 item in batch, automatically pass it
+        // Use a flag to prevent infinite loops
         if (batch.length === 1) {
-            console.warn('Batch size of 1 detected, auto-passing...');
-            setTimeout(() => {
-                this.picker.pass();
-                this.update();
-            }, 100);
+            console.warn('Batch size of 1 detected, auto-passing:', batch[0].id);
+            // Pass synchronously, then schedule UI update
+            this.picker.pass();
+            // Use requestAnimationFrame for smoother update
+            requestAnimationFrame(() => this.update());
             return;
         }
 
