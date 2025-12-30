@@ -403,7 +403,7 @@ class PresidentialPicker {
             ...this.survived,
             ...this.eliminated.map(e => e.id)
         ]);
-        
+
         return this.allItems
             .filter(item => !accounted.has(item.id))
             .map(item => item.id);
@@ -592,10 +592,9 @@ class PickerUI {
             return;
         }
 
-        // Format as numbered list with presidential numbers
+        // Format as numbered list (names only)
         const listText = favorites.map((person, index) => {
-            const presNum = this.getPresidentialNumber(person);
-            return `${index + 1}. ${person.name} ${presNum}`;
+            return `${index + 1}. ${person.name}`;
         }).join('\n');
 
         // Copy to clipboard
@@ -849,7 +848,7 @@ class PickerUI {
                 const found = this.picker.favorites.length;
                 const notice = document.createElement('div');
                 notice.className = 'picker-notice';
-                
+
                 if (found === total) {
                     notice.innerHTML = this.picker.hasItems()
                         ? `<p>${this.messages.orderedAll}</p><p class="muted">All ${total} presidents ranked!</p><button class="btn" id="picker-reset-inline">Start Over</button>`
