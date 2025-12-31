@@ -928,6 +928,11 @@ class PickerUI {
         name.className = 'picker-name';
         name.textContent = person.name;
 
+        // Years label
+        const years = document.createElement('div');
+        years.className = 'picker-years';
+        years.textContent = person.years;
+
         // Number badge
         if (person.number != null) {
             const badge = document.createElement('span');
@@ -938,6 +943,7 @@ class PickerUI {
 
         el.appendChild(imgWrap);
         el.appendChild(name);
+        el.appendChild(years);
 
         return el;
     }
