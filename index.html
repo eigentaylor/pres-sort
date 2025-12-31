@@ -5,8 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Presidential Preference Sorter & Tier List</title>
-  <meta name="description"
-    content="Interactive sorter and tier list for U.S. presidents.">
+  <meta name="description" content="Interactive sorter and tier list for U.S. presidents.">
   <link rel="stylesheet" href="style.css" />
   <link rel="icon"
     href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🇺🇸</text></svg>">
@@ -42,19 +41,20 @@
     <!-- Router screens -->
     <section id="screen-welcome" class="screen" aria-labelledby="welcome-title">
       <h2 id="welcome-title">Welcome</h2>
-      <p>This tool lets you sort U.S. presidents via pairwise choices and then build a custom SS–F tier list. All data
-        stays on your device. You can export or share your state any time.</p>
+      <p>This tool lets you sort U.S. presidents and then build a custom SS–F tier list.</p>
       <div class="welcome-actions">
         <button id="btn-start" class="btn primary">Start Sorting (Pairwise)</button>
         <button id="btn-start-picker" class="btn primary">Start Sorting (Approval-Style Picker)</button>
-        <label style="display:inline-flex;align-items:center;gap:.5rem;margin-left:1rem">
-          <input id="use-historian" type="checkbox" checked /> Use Historian Ranking Seed
-        </label>
         <!-- <button id="btn-start-elo" class="btn primary">Start Sorting (ELO)</button> -->
         <button id="btn-resume" class="btn" hidden>Resume</button>
         <button id="btn-resume-picker" class="btn" hidden>Resume Picker</button>
         <button id="btn-skip-to-tiers" class="btn" hidden>Skip to Tier Board</button>
         <!-- <button id="btn-repair" class="btn">Repair State</button> -->
+      </div>
+      <div class="welcome-actions-secondary" style="margin-top:.75rem;display:flex;align-items:center;gap:.75rem">
+        <label style="display:inline-flex;align-items:center;gap:.5rem">
+          <input id="use-historian" type="checkbox" checked /> Use Historian Ranking Seed for Pairwise Sorter
+        </label>
       </div>
       <!-- <div class="welcome-elo-settings" style="margin-top:.5rem">
         <label style="display:inline-flex;align-items:center;gap:.5rem">ELO intensity:
