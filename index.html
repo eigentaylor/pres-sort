@@ -31,8 +31,8 @@
       <h1 class="app-title">Presidential Preference Sorter & Tier List</h1>
       <div class="header-actions">
         <button id="btn-theme" class="btn" aria-label="Toggle theme" title="Toggle theme (dark/light)">🌗</button>
-        <button id="btn-help" class="btn" aria-haspopup="dialog" aria-controls="modal-help"
-          title="About / Help">?</button>
+        <button id="btn-help" class="btn" aria-haspopup="dialog" aria-controls="modal-help" title="About / Help"
+          style="display: none;">?</button>
       </div>
     </div>
   </header>
@@ -224,7 +224,7 @@
   </footer>
 
   <!-- Help modal -->
-  <dialog id="modal-help" aria-labelledby="help-title">
+  <dialog id="modal-help" aria-labelledby="help-title" style="display: none;">
     <h3 id="help-title">About & Help</h3>
     <p>
       This app uses an interactive merge sort. You compare two candidates at a time. Ties keep the left list's order.
